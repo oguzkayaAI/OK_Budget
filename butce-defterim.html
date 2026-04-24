@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bütçe Defterim</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0f0f13; font-family: 'Segoe UI', sans-serif; }
+    input, select, button { font-family: inherit; outline: none; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+    @keyframes fadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback } = React;
+
+    // ─── STORAGE HELPERS
+    const S = {
+      get: (k, def) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } },
+      set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+    };
+
+    const MONTHS = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
+    const FULL_MONTHS = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+    const now = new Date();
+    const CY = now.getFullYear();
+    const CM = now.getMonth();
+
+    function uid() { return Math.random().toString(36).slice(2, 9); }
+
+    const defaultState = () => ({
+      incomeItems: [
+        { id: uid(), label: "Maaş", type: "salary", amount: 0, active: true },
+        { id: uid(), label: "Kira Geliri", type: "rent_income", amount: 0, active: true },
+        { id: uid(), label: "Faiz Geliri", type: "interest", amount: 0, active: true },
+      ],
+      expenseItems: [
+        { id: uid(), label: "Kira", type: "fixed", amount: 0, active: true },
+        { id: uid(), label: "Kredi (Konut)", type: "installment", amount: 0, remaining: 0, active: true },
+        { id: uid(), label: "Kredi Kartı Ödeme", type: "credit_card", amount: 0, active: true },
+      ],
+      creditCards: [
+        { id: uid(), label: "Kart 1", limit: 0, cutDay: 25, dueDay: 10, color: "#e63946" },
+      ],
+      assets: { gold_gram: 0, gold_quarter: 0, gold_half: 0, gold_full: 0, cash_try: 0, cash_usd: 0, cash_eur: 0, investment: 0, other: 0 },
+      budgets: [],
+      monthlyData: {},
+      prices: { gold_gram: 3200, usd: 32, eur: 35 },
+      notifGranted: false,
+      activeTab: "dashboard",
+    });
+
+    function getMonthKey(y, m) { return `${y}-${m}`; }
+
+    function calcNetWorth(assets, prices) {
+      return assets.gold_gram * prices.gold_gram + assets.gold_quarter * prices.gold_gram * 1.75 + assets.gold_half * prices.gold_gram * 3.5 + assets.gold_full * prices.gold_gram * 7 + assets.cash_try + assets.cash_usd * prices.usd + assets.cash_eur * prices.eur + assets.investment + assets.other;
+    }
+
+    function getMonthIncome(state, y, m) {
+      const overrides = state.monthlyData[getMonthKey(y, m)]?.incomeOverrides || {};
+      return state.incomeItems.filter(i => i.active).reduce((sum, i) => sum + (overrides[i.id] !== undefined ? overrides[i.id] : i.amount), 0);
+    }
+
+    function getMonthExpense(state, y, m) {
+      const overrides = state.monthlyData[getMonthKey(y, m)]?.expenseOverrides || {};
+      const budgetTotal = state.budgets.filter(b => b.year === y && b.month === m).reduce((s, b) => s + b.amount, 0);
+      return state.expenseItems.filter(i => i.active).reduce((sum, i) => sum + (overrides[i.id] !== undefined ? overrides[i.id] : i.amount), 0) + budgetTotal;
+    }
+
+    function fmt(n) {
+      if (!n && n !== 0) return "—";
+      return new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY", maximumFractionDigits: 0 }).format(n);
+    }
+
+    const INCOME_TYPES = { salary: "Maaş", rent_income: "Kira Geliri", interest: "Faiz / Mevduat", freelance: "Serbest / Proje", dividend: "Temettü", other_income: "Diğer Gelir" };
+    const EXPENSE_TYPES = { fixed: "Sabit Gider", variable: "Değişken Gider", installment: "Taksit / Kredi", credit_card: "Kredi Kartı", rent: "Kira", subscription: "Abonelik", other_expense: "Diğer Gider" };
+
+    // ─── STYLES
+    const st = {
+      root: { minHeight: "100vh", background: "#0f0f13", color: "#e8e8e8", fontSize: 14 },
+      header: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 24px", background: "rgba(255,255,255,.04)", borderBottom: "1px solid rgba(255,255,255,.08)", position: "sticky", top: 0, zIndex: 100 },
+      headerLeft: { display: "flex", alignItems: "center", gap: 14 },
+      logo: { width: 42, height: 42, borderRadius: 12, background: "linear-gradient(135deg, #e9c46a, #f4a261)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 900, color: "#0f0f13", flexShrink: 0 },
+      appTitle: { fontWeight: 800, fontSize: 17, letterSpacing: "-0.3px" },
+      appSub: { fontSize: 11, color: "#888", marginTop: 1 },
+      headerRight: { display: "flex", alignItems: "center", gap: 10 },
+      dueBadge: { background: "rgba(230,57,70,.25)", border: "1px solid rgba(230,57,70,.5)", color: "#ff8a80", padding: "6px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer", fontWeight: 600 },
+      notifBtn: { background: "rgba(233,196,106,.15)", border: "1px solid rgba(233,196,106,.4)", color: "#e9c46a", padding: "6px 12px", borderRadius: 8, fontSize: 12, cursor: "pointer" },
+      nav: { display: "flex", overflowX: "auto", gap: 2, padding: "8px 16px", background: "rgba(255,255,255,.02)", borderBottom: "1px solid rgba(255,255,255,.06)" },
+      navBtn: { display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, border: "none", background: "transparent", color: "#888", cursor: "pointer", fontSize: 13, fontWeight: 500, whiteSpace: "nowrap" },
+      navBtnActive: { background: "rgba(233,196,106,.15)", color: "#e9c46a", fontWeight: 700 },
+      main: { padding: "24px 20px", maxWidth: 960, margin: "0 auto" },
+      tabContent: { display: "flex", flexDirection: "column", gap: 20 },
+      sectionTitle: { fontSize: 20, fontWeight: 800, letterSpacing: "-0.5px", color: "#f0f0f0" },
+      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px,1fr))", gap: 14 },
+      kpiCard: { background: "rgba(255,255,255,.05)", borderRadius: 14, padding: "18px 16px" },
+      kpiIcon: { fontSize: 22, marginBottom: 8 },
+      kpiValue: { fontSize: 20, fontWeight: 800, letterSpacing: "-0.5px" },
+      kpiLabel: { fontSize: 11, color: "#888", marginTop: 4 },
+      card: { background: "rgba(255,255,255,.04)", borderRadius: 16, padding: "18px 20px", border: "1px solid rgba(255,255,255,.07)" },
+      cardTitle: { fontSize: 13, fontWeight: 700, color: "#aaa", marginBottom: 14, textTransform: "uppercase", letterSpacing: "0.5px" },
+      row2col: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 },
+      listRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,.06)" },
+      listLeft: { display: "flex", alignItems: "center", gap: 12 },
+      listRight: { display: "flex", alignItems: "center", gap: 8 },
+      listLabel: { fontWeight: 600, fontSize: 14 },
+      listSub: { fontSize: 11, color: "#888", marginTop: 2 },
+      amtInput: { width: 100, padding: "6px 10px", borderRadius: 8, background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.1)", color: "#f0f0f0", fontSize: 14, fontWeight: 600, textAlign: "right" },
+      currency: { fontSize: 12, color: "#888" },
+      deleteBtn: { background: "rgba(230,57,70,.2)", border: "none", color: "#e63946", width: 28, height: 28, borderRadius: 6, cursor: "pointer", fontSize: 12 },
+      formRow: { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 },
+      input: { flex: 1, minWidth: 120, padding: "9px 12px", borderRadius: 8, background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.12)", color: "#f0f0f0", fontSize: 13 },
+      select: { flex: 1, minWidth: 140, padding: "9px 12px", borderRadius: 8, background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.12)", color: "#f0f0f0", fontSize: 13 },
+      addBtn: { padding: "9px 18px", borderRadius: 8, background: "linear-gradient(135deg, #e9c46a, #f4a261)", border: "none", color: "#0f0f13", fontWeight: 800, cursor: "pointer", fontSize: 13 },
+      itemRow: { display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid rgba(255,255,255,.05)" },
+      itemLabel: { color: "#ccc" },
+      itemAmt: { fontWeight: 700 },
+      monthSelector: { display: "flex", gap: 6, flexWrap: "wrap" },
+      monthBtn: { padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,.1)", background: "transparent", color: "#888", cursor: "pointer", fontSize: 12 },
+      monthBtnActive: { background: "rgba(233,196,106,.2)", color: "#e9c46a", fontWeight: 700, borderColor: "rgba(233,196,106,.4)" },
+      payRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", borderRadius: 10, marginBottom: 8 },
+      paidBtn: { padding: "7px 16px", borderRadius: 8, border: "none", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 12 },
+      dueRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,.06)" },
+      dueLabel: { fontWeight: 600 },
+      dueAmt: { fontSize: 12, color: "#e9c46a", marginTop: 2 },
+      cardGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px,1fr))", gap: 16 },
+      creditCard: { borderRadius: 16, padding: "20px", color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,.4)" },
+      ccTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 },
+      ccLabel: { fontSize: 18, fontWeight: 800 },
+      ccDelete: { background: "rgba(0,0,0,.3)", border: "none", color: "#fff", width: 26, height: 26, borderRadius: 6, cursor: "pointer", fontSize: 11 },
+      ccLimit: { fontSize: 13, opacity: 0.9, marginBottom: 16 },
+      ccDates: { display: "flex", gap: 12, alignItems: "center" },
+      ccDateSep: { opacity: 0.5, fontSize: 20 },
+      ccDate: { flex: 1 },
+      ccDateVal: { fontSize: 28, fontWeight: 900, lineHeight: 1 },
+      ccDateLbl: { fontSize: 10, opacity: 0.8, marginTop: 2 },
+      ccDaysLeft: { fontSize: 10, opacity: 0.7, marginTop: 2 },
+      cardRow: { display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,.06)" },
+      cardDot: { width: 12, height: 12, borderRadius: "50%", flexShrink: 0 },
+      assetRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,.05)" },
+      assetLabel: { color: "#ccc", fontSize: 13 },
+      assetInput: { display: "flex", alignItems: "center", gap: 6 },
+      priceField: { flex: 1, minWidth: 120 },
+      priceLabel: { display: "block", fontSize: 11, color: "#888", marginBottom: 5 },
+      table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+      th: { padding: "8px 12px", textAlign: "right", color: "#888", fontSize: 11, fontWeight: 700, borderBottom: "1px solid rgba(255,255,255,.08)" },
+      td: { padding: "9px 12px", textAlign: "right", borderBottom: "1px solid rgba(255,255,255,.05)" },
+      barChart: { display: "flex", gap: 8, alignItems: "flex-end", height: 140, marginTop: 12 },
+      barGroup: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 },
+      barPair: { width: "100%", display: "flex", gap: 2, alignItems: "flex-end", height: 110 },
+      bar: { flex: 1, borderRadius: "3px 3px 0 0", minHeight: 3 },
+      barLabel: { fontSize: 10, color: "#888" },
+      barLegend: { marginTop: 12, fontSize: 12, color: "#888" },
+      miniBar: { display: "flex", gap: 4, alignItems: "flex-end", height: 80 },
+      miniBarGroup: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%" },
+      budgetCard: { background: "rgba(255,255,255,.05)", borderRadius: 14, padding: "16px", border: "1px solid rgba(233,196,106,.2)" },
+      budgetTop: { display: "flex", justifyContent: "space-between", marginBottom: 10 },
+      budgetLabel: { fontWeight: 700, fontSize: 15 },
+      budgetDate: { fontSize: 11, color: "#888", marginTop: 3 },
+      budgetAmt: { fontSize: 22, fontWeight: 900, color: "#e9c46a" },
+      budgetNote: { fontSize: 11, color: "#888", marginTop: 8 },
+      toast: { position: "fixed", bottom: 24, right: 24, zIndex: 9999, padding: "12px 20px", borderRadius: 12, fontWeight: 700, color: "#fff", fontSize: 14, boxShadow: "0 8px 32px rgba(0,0,0,.4)", animation: "fadein .2s ease" },
+      empty: { color: "#666", fontSize: 13, padding: "12px 0", textAlign: "center" },
+    };
+
+    function totalBannerStyle(color) {
+      return { padding: "12px 18px", borderRadius: 12, background: color + "22", border: `1px solid ${color}44`, color, fontWeight: 700, fontSize: 16 };
+    }
+
+    function toggleBtnStyle(active) {
+      return { width: 20, height: 20, border: "none", background: "none", color: active ? "#2a9d8f" : "#555", cursor: "pointer", fontSize: 16, padding: 0 };
+    }
+
+    // ─── COMPONENTS
+
+    function KpiCard({ label, value, color, icon }) {
+      return (
+        <div style={{ ...st.kpiCard, borderTop: `3px solid ${color}` }}>
+          <div style={{ ...st.kpiIcon, color }}>{icon}</div>
+          <div style={st.kpiValue}>{value}</div>
+          <div style={st.kpiLabel}>{label}</div>
+        </div>
+      );
+    }
+
+    function ItemRow({ label, amount, color }) {
+      return (
+        <div style={st.itemRow}>
+          <span style={st.itemLabel}>{label}</span>
+          <span style={{ ...st.itemAmt, color }}>{fmt(amount)}</span>
+        </div>
+      );
+    }
+
+    function MiniBar({ data }) {
+      const max = Math.max(...data.map(r => Math.max(r.income, r.expense)), 1);
+      return (
+        <div style={st.miniBar}>
+          {data.map((row, i) => (
+            <div key={i} style={st.miniBarGroup}>
+              <div style={{ flex: 1, display: "flex", alignItems: "flex-end", gap: 1 }}>
+                <div style={{ flex: 1, height: `${(row.income / max) * 60}px`, background: "#2a9d8f", borderRadius: "2px 2px 0 0", minHeight: 2 }} />
+                <div style={{ flex: 1, height: `${(row.expense / max) * 60}px`, background: "#e63946", borderRadius: "2px 2px 0 0", minHeight: 2 }} />
+              </div>
+              <div style={{ fontSize: 9, color: "#888", marginTop: 2 }}>{MONTHS[i]}</div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ─── DASHBOARD
+    function Dashboard({ state, forecastWithCumul, due, togglePayment }) {
+      const thisMonth = forecastWithCumul[CM] || { income: 0, expense: 0, net: 0 };
+      const netWorth = calcNetWorth(state.assets, state.prices);
+      return (
+        <div style={st.tabContent}>
+          <div style={st.sectionTitle}>Bu Ay · {FULL_MONTHS[CM]} {CY}</div>
+          <div style={st.kpiGrid}>
+            <KpiCard label="Aylık Gelir" value={fmt(thisMonth.income)} color="#2a9d8f" icon="↑" />
+            <KpiCard label="Aylık Gider" value={fmt(thisMonth.expense)} color="#e63946" icon="↓" />
+            <KpiCard label="Net Tasarruf" value={fmt(thisMonth.net)} color={thisMonth.net >= 0 ? "#2a9d8f" : "#e63946"} icon="=" />
+            <KpiCard label="Toplam Varlık" value={fmt(netWorth)} color="#e9c46a" icon="◈" />
+          </div>
+          {due.length > 0 && (
+            <div style={st.card}>
+              <div style={st.cardTitle}>🔔 Bugün Yapılacak Ödemeler</div>
+              {due.map(item => (
+                <div key={item.id} style={st.dueRow}>
+                  <div>
+                    <div style={st.dueLabel}>{item.label}</div>
+                    {!item.isCard && <div style={st.dueAmt}>{fmt(item.amount)}</div>}
+                  </div>
+                  {!item.isCut && (
+                    <button style={{ ...st.paidBtn, background: "#e63946" }} onClick={() => togglePayment(item.key, item.id)}>✓ Ödedim</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={st.card}>
+            <div style={st.cardTitle}>Yıl Boyu Birikim Grafiği</div>
+            <MiniBar data={forecastWithCumul} />
+          </div>
+          <div style={st.row2col}>
+            <div style={st.card}>
+              <div style={st.cardTitle}>Gelir Kalemleri</div>
+              {state.incomeItems.filter(i => i.active).map(i => <ItemRow key={i.id} label={i.label} amount={i.amount} color="#2a9d8f" />)}
+            </div>
+            <div style={st.card}>
+              <div style={st.cardTitle}>Gider Kalemleri</div>
+              {state.expenseItems.filter(i => i.active).map(i => <ItemRow key={i.id} label={i.label} amount={i.amount} color="#e63946" />)}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── INCOME TAB
+    function IncomeTab({ state, upd, showToast }) {
+      const [form, setForm] = useState({ label: "", type: "salary", amount: "" });
+      const addItem = () => {
+        if (!form.label || !form.amount) return;
+        upd(s => { s.incomeItems = [...s.incomeItems, { id: uid(), ...form, amount: +form.amount, active: true }]; });
+        setForm({ label: "", type: "salary", amount: "" });
+        showToast("Gelir kalemi eklendi");
+      };
+      const total = state.incomeItems.filter(i => i.active).reduce((s, i) => s + i.amount, 0);
+      return (
+        <div style={st.tabContent}>
+          <div style={st.sectionTitle}>Gelir Kalemleri</div>
+          <div style={totalBannerStyle("#2a9d8f")}>Toplam Aylık Gelir: {fmt(total)}</div>
+          <div style={st.card}>
+            {state.incomeItems.map(item => (
+              <div key={item.id} style={{ ...st.listRow, opacity: item.active ? 1 : 0.45 }}>
+                <div style={st.listLeft}>
+                  <button style={toggleBtnStyle(item.active)} onClick={() => upd(s => { s.incomeItems = s.incomeItems.map(i => i.id === item.id ? { ...i, active: !i.active } : i); })}>{item.active ? "●" : "○"}</button>
+                  <div>
+                    <div style={st.listLabel}>{item.label}</div>
+                    <div style={st.listSub}>{INCOME_TYPES[item.type] || item.type}</div>
+                  </div>
+                </div>
+                <div style={st.listRight}>
+                  <input style={st.amtInput} type="number" value={item.amount} onChange={e => upd(s => { s.incomeItems = s.incomeItems.map(i => i.id === item.id ? { ...i, amount: +e.target.value } : i); })} />
+                  <span style={st.currency}>₺</span>
+                  <button style={st.deleteBtn} onClick={() => upd(s => { s.incomeItems = s.incomeItems.filter(i => i.id !== item.id); })}>✕</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={st.card}>
+            <div style={st.cardTitle}>Yeni Gelir Kalemi</div>
+            <div style={st.formRow}>
+              <input style={st.input} placeholder="Kalem adı" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} />
+              <select style={st.select} value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
+                {Object.entries(INCOME_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              <input style={st.input} type="number" placeholder="Tutar ₺" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+              <button style={st.addBtn} onClick={addItem}>+ Ekle</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── EXPENSES TAB
+    function ExpensesTab({ state, upd, showToast }) {
+      const [form, setForm] = useState({ label: "", type: "fixed", amount: "", remaining: "", dueDay: "" });
+      const addItem = () => {
+        if (!form.label || !form.amount) return;
+        upd(s => { s.expenseItems = [...s.expenseItems, { id: uid(), ...form, amount: +form.amount, remaining: +form.remaining || 0, dueDay: +form.dueDay || 0, active: true }]; });
+        setForm({ label: "", type: "fixed", amount: "", remaining: "", dueDay: "" });
+        showToast("Gider kalemi eklendi");
+      };
+      const total = state.expenseItems.filter(i => i.active).reduce((s, i) => s + i.amount, 0);
+      return (
+        <div style={st.tabContent}>
+          <div style={st.sectionTitle}>Gider Kalemleri</div>
+          <div style={totalBannerStyle("#e63946")}>Toplam Aylık Gider: {fmt(total)}</div>
+          <div style={st.card}>
+            {state.expenseItems.map(item => (
+              <div key={item.id} style={{ ...st.listRow, opacity: item.active ? 1 : 0.45 }}>
+                <div style={st.listLeft}>
+                  <button style={toggleBtnStyle(item.active)} onClick={() => upd(s => { s.expenseItems = s.expenseItems.map(i => i.id === item.id ? { ...i, active: !i.active } : i); })}>{item.active ? "●" : "○"}</button>
+                  <div>
+                    <div style={st.listLabel}>{item.label}</div>
+                    <div style={st.listSub}>
+                      {EXPENSE_TYPES[item.type]}
+                      {item.dueDay ? ` · Vade: Her ayın ${item.dueDay}'i` : ""}
+                      {item.remaining ? ` · Kalan: ${item.remaining} taksit` : ""}
+                    </div>
+                  </div>
+                </div>
+                <div style={st.listRight}>
+                  <input style={st.amtInput} type="number" value={item.amount} onChange={e => upd(s => { s.expenseItems = s.expenseItems.map(i => i.id === item.id ? { ...i, amount: +e.target.value } : i); })} />
+                  <span style={st.currency}>₺</span>
+                  <button style={st.deleteBtn} onClick={() => upd(s => { s.expenseItems = s.expenseItems.filter(i => i.id !== item.id); })}>✕</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={st.card}>
+            <div style={st.cardTitle}>Yeni Gider Kalemi</div>
+            <div style={st.formRow}>
+              <input style={st.input} placeholder="Kalem adı" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} />
+              <select style={st.select} value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
+                {Object.entries(EXPENSE_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+            <div style={st.formRow}>
+              <input style={st.input} type="number" placeholder="Aylık tutar ₺" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+              <input style={st.input} type="number" placeholder="Kalan taksit (opsiyonel)" value={form.remaining} onChange={e => setForm(f => ({ ...f, remaining: e.target.value }))} />
+              <input style={st.input} type="number" placeholder="Vade günü (ör: 15)" value={form.dueDay} onChange={e => setForm(f => ({ ...f, dueDay: e.target.value }))} />
+              <button style={st.addBtn} onClick={addItem}>+ Ekle</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── PAYMENTS TAB
+    function PaymentsTab({ state, upd, togglePayment }) {
+      const [selMonth, setSelMonth] = useState(CM);
+      const monthKey = getMonthKey(CY, selMonth);
+      const payments = state.monthlyData[monthKey]?.payments || {};
+      const dueItems = state.expenseItems.filter(i => i.active && i.dueDay > 0);
+      const totalDue = dueItems.reduce((s, i) => s + i.amount, 0);
+      const paidTotal = dueItems.filter(i => payments[i.id]).reduce((s, i) => s + i.amount, 0);
+      return (
+        <div style={st.tabContent}>
+          <div style={st.sectionTitle}>Ödeme Takibi</div>
+          <div style={st.monthSelector}>
+            {MONTHS.map((m, i) => (
+              <button key={i} style={{ ...st.monthBtn, ...(selMonth === i ? st.monthBtnActive : {}) }} onClick={() => setSelMonth(i)}>{m}</button>
+            ))}
+          </div>
+          <div style={st.kpiGrid}>
+            <KpiCard label="Toplam Vadeli Ödeme" value={fmt(totalDue)} color="#e9c46a" icon="₺" />
+            <KpiCard label="Ödenen" value={fmt(paidTotal)} color="#2a9d8f" icon="✓" />
+            <KpiCard label="Kalan" value={fmt(totalDue - paidTotal)} color="#e63946" icon="!" />
+          </div>
+          <div style={st.card}>
+            <div style={st.cardTitle}>Vadeli Giderler · {FULL_MONTHS[selMonth]}</div>
+            {dueItems.length === 0 && <div style={st.empty}>Vadeli gider yok. Gider sekmesinden vade günü ekleyebilirsiniz.</div>}
+            {dueItems.map(item => {
+              const paid = !!payments[item.id];
+              return (
+                <div key={item.id} style={{ ...st.payRow, background: paid ? "rgba(42,157,143,.15)" : "rgba(230,57,70,.08)" }}>
+                  <div>
+                    <div style={st.listLabel}>{item.label}</div>
+                    <div style={st.listSub}>Her ayın {item.dueDay}'i · {fmt(item.amount)}</div>
+                  </div>
+                  <button style={{ ...st.paidBtn, background: paid ? "#2a9d8f" : "#e63946" }} onClick={() => togglePayment(monthKey, item.id)}>
+                    {paid ? "✓ Ödendi" : "Öde"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <div style={st.card}>
+            <div style={st.cardTitle}>Kredi Kartı Tarihleri · {FULL_MONTHS[selMonth]}</div>
+            {state.creditCards.length === 0 && <div style={st.empty}>Kart eklenmemiş.</div>}
+            {state.creditCards.map(c => (
+              <div key={c.id} style={st.cardRow}>
+                <div style={{ ...st.cardDot, background: c.color }} />
+                <div style={{ flex: 1 }}>
+                  <div style={st.listLabel}>{c.label}</div>
+                  <div style={st.listSub}>Hesap Kesim: {c.cutDay}. gün · Son Ödeme: {c.dueDay}. gün</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 11, color: "#aaa" }}>Limit</div>
+                  <div style={{ fontWeight: 700 }}>{fmt(c.limit)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── CARDS TAB
+    function CardsTab({ state, upd, showToast }) {
+      const [form, setForm] = useState({ label: "", limit: "", cutDay: "", dueDay: "", color: "#e63946" });
+      const addCard = () => {
+        if (!form.label) return;
+        upd(s => { s.creditCards = [...s.creditCards, { id: uid(), ...form, limit: +form.limit, cutDay: +form.cutDay, dueDay: +form.dueDay }]; });
+        setForm({ label: "", limit: "", cutDay: "", dueDay: "", color: "#e63946" });
+        showToast("Kart eklendi");
+      };
+      const today = new Date().getDate();
+      return (
+        <div style={st.tabContent}>
+          <div style={st.sectionTitle}>Kredi Kartları</div>
+          <div style={st.cardGrid}>
+            {state.creditCards.map(c => {
+              const daysUntilCut = ((c.cutDay - today + 31) % 31) || 31;
+              const daysUntilDue = ((c.dueDay - today + 31) % 31) || 31;
+              return (
+                <div key={c.id} style={{ ...st.creditCard, background: `linear-gradient(135deg, ${c.color}dd, ${c.color}88)` }}>
+                  <div style={st.ccTop}>
+                    <div style={st.ccLabel}>{c.label}</div>
+                    <button style={st.ccDelete} onClick={() => upd(s => { s.creditCards = s.creditCards.filter(x => x.id !== c.id); })}>✕</button>
+                  </div>
+                  <div style={st.ccLimit}>Limit: {fmt(c.limit)}</div>
+                  <div style={st.ccDates}>
+                    <div style={st.ccDate}>
+                      <div style={st.ccDateVal}>{c.cutDay}</div>
+                      <div style={st.ccDateLbl}>Hesap Kesim</div>
+                      <div style={st.ccDaysLeft}>{daysUntilCut} gün kaldı</div>
+                    </div>
+                    <div style={st.ccDateSep}>·</div>
+                    <div style={st.ccDate}>
+                      <div style={st.ccDateVal}>{c.dueDay}</div>
+                      <div style={st.ccDateLbl}>Son Ödeme</div>
+                      <div style={st.ccDaysLeft}>{daysUntilDue} gün kaldı</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={st.card}>
+            <div style={st.cardTitle}>Yeni Kart Ekle</div>
+            <div style={st.formRow}>
+              <input style={st.input} placeholder="Kart adı" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} />
+              <input style={st.input} type="number" placeholder="Limit ₺" value={form.limit} onChange={e => setForm(f => ({ ...f, limit: e.target.value }))} />
+            </div>
+            <div style={st.formRow}>
+              <input style={st.input} type="number" placeholder="Hesap kesim günü" value={form.cutDay} onChange={e => setForm(f => ({ ...f, cutDay: e.target.value }))} />
+              <input style={st.input} type="number" placeholder="Son ödeme günü" value={form.dueDay} onChange={e => setForm(f => ({ ...f, dueDay: e.target.value }))} />
+              <input type="color" value={form.color} onChange={e => setForm(f => ({ ...f, color: e.target.value }))} style={{ width: 44, height: 44, border: "none", borderRadius: 8, cursor: "pointer" }} />
+              <button style={st.addBtn} onClick={addCard}>+ Ekle</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── ASSETS TAB
+    function AssetsTab({ state, upd }) {
+      const a = state.assets;
+      const p = state.prices;
+      const netWorth = calcNetWorth(a, p);
+      const goldValue = a.gold_gram * p.gold_gram + a.gold_quarter * p.gold_gram * 1.75 + a.gold_half * p.gold_gram * 3.5 + a.gold_full * p.gold_gram * 7;
+      const cashValue = a.cash_try + a.cash_usd * p.usd + a.cash_eur * p.eur;
+      return (
+        <div style={st.tabContent}>
+          <div style={st.sectionTitle}>Varlık Takibi</div>
+          <div style={st.kpiGrid}>
+            <KpiCard label="Toplam Varlık" value={fmt(netWorth)} color="#e9c46a" icon="◈" />
+            <KpiCard label="Altın Değeri" value={fmt(goldValue)} color="#f4a261" icon="◉" />
+            <KpiCard label="Nakit / Mevduat" value={fmt(cashValue)} color="#2a9d8f" icon="₺" />
+            <KpiCard label="Yatırım / Diğer" value={fmt(a.investment + a.other)} color="#9b72cf" icon="▲" />
+          </div>
+          <div style={st.card}>
+            <div style={st.cardTitle}>Fiyat Güncelle</div>
+            <div style={st.formRow}>
+              {[["gold_gram","Gram Altın (₺)"],["usd","USD/TL"],["eur","EUR/TL"]].map(([k,l]) => (
+                <div key={k} style={st.priceField}>
+                  <label style={st.priceLabel}>{l}</label>
+                  <input style={st.input} type="number" value={p[k]} onChange={e => upd(s => { s.prices = { ...s.prices, [k]: +e.target.value }; })} />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={st.row2col}>
+            <div style={st.card}>
+              <div style={st.cardTitle}>🥇 Altın</div>
+              {[["gold_gram","Gram Altın","gr"],["gold_quarter","Çeyrek Altın","adet"],["gold_half","Yarım Altın","adet"],["gold_full","Tam Altın","adet"]].map(([k,l,u]) => (
+                <div key={k} style={st.assetRow}>
+                  <span style={st.assetLabel}>{l}</span>
+                  <div style={st.assetInput}>
+                    <input style={st.amtInput} type="number" value={a[k]} onChange={e => upd(s => { s.assets = { ...s.assets, [k]: +e.target.value }; })} />
+                    <span style={st.currency}>{u}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={st.card}>
+              <div style={st.cardTitle}>💵 Nakit & Yatırım</div>
+              {[["cash_try","Nakit TL","₺"],["cash_usd","Dolar","$"],["cash_eur","Euro","€"],["investment","Yatırım / Mevduat","₺"],["other","Diğer","₺"]].map(([k,l,u]) => (
+                <div key={k} style={st.assetRow}>
+                  <span style={st.assetLabel}>{l}</span>
+                  <div style={st.assetInput}>
+                    <input style={st.amtInput} type="number" value={a[k]} onChange={e => upd(s => { s.assets = { ...s.assets, [k]: +e.target.value }; })} />
+                    <span style={st.currency}>{u}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── FORECAST TAB
+    function ForecastTab({ forecastWithCumul }) {
+      const maxVal = Math.max(...forecastWithCumul.map(r => Math.max(r.income, r.expense)), 1);
+      return (
+        <div style={st.tabContent}>
+          <div style={st.sectionTitle}>Yıl Sonu Projeksiyon · {CY}</div>
+          <div style={st.card}>
+            <div style={st.cardTitle}>Aylık Gelir / Gider Karşılaştırması</div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={st.table}>
+                <thead>
+                  <tr>
+                    <th style={st.th}>Ay</th>
+                    <th style={{ ...st.th, color: "#2a9d8f" }}>Gelir</th>
+                    <th style={{ ...st.th, color: "#e63946" }}>Gider</th>
+                    <th style={st.th}>Net</th>
+                    <th style={st.th}>Birikimli</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {forecastWithCumul.map((row, i) => (
+                    <tr key={i} style={{ background: i === CM ? "rgba(233,196,106,.12)" : "transparent" }}>
+                      <td style={{ ...st.td, fontWeight: i === CM ? 700 : 400 }}>{FULL_MONTHS[row.m]}</td>
+                      <td style={{ ...st.td, color: "#2a9d8f" }}>{fmt(row.income)}</td>
+                      <td style={{ ...st.td, color: "#e63946" }}>{fmt(row.expense)}</td>
+                      <td style={{ ...st.td, color: row.net >= 0 ? "#2a9d8f" : "#e63946", fontWeight: 600 }}>{fmt(row.net)}</td>
+                      <td style={{ ...st.td, color: row.cumulative >= 0 ? "#e9c46a" : "#e63946", fontWeight: 700 }}>{fmt(row.cumulative)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div style={st.card}>
+            <div style={st.cardTitle}>Bar Grafik</div>
+            <div style={st.barChart}>
+              {forecastWithCumul.map((row, i) => (
+                <div key={i} style={st.barGroup}>
+                  <div style={st.barPair}>
+                    <div style={{ ...st.bar, height: `${(row.income / maxVal) * 100}%`, background: "#2a9d8f" }} />
+                    <div style={{ ...st.bar, height: `${(row.expense / maxVal) * 100}%`, background: "#e63946" }} />
+                  </div>
+                  <div style={{ ...st.barLabel, fontWeight: i === CM ? 700 : 400 }}>{MONTHS[row.m]}</div>
+                </div>
+              ))}
+            </div>
+            <div style={st.barLegend}>
+              <span style={{ color: "#2a9d8f" }}>■ Gelir</span>
+              <span style={{ color: "#e63946", marginLeft: 16 }}>■ Gider</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── BUDGETS TAB
+    function BudgetsTab({ state, upd, showToast }) {
+      const [form, setForm] = useState({ label: "", amount: "", month: CM, year: CY, note: "" });
+      const addBudget = () => {
+        if (!form.label || !form.amount) return;
+        upd(s => { s.budgets = [...s.budgets, { id: uid(), ...form, amount: +form.amount, month: +form.month, year: +form.year }]; });
+        setForm({ label: "", amount: "", month: CM, year: CY, note: "" });
+        showToast("Bütçe eklendi");
+      };
+      return (
+        <div style={st.tabContent}>
+          <div style={st.sectionTitle}>Özel Bütçe Dönemleri</div>
+          {state.budgets.length === 0 && <div style={st.empty}>Henüz özel bütçe eklenmemiş. Tatil, düğün, hediye gibi özel harcamalar için ekleyin.</div>}
+          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fill, minmax(280px,1fr))" }}>
+            {state.budgets.map(b => (
+              <div key={b.id} style={st.budgetCard}>
+                <div style={st.budgetTop}>
+                  <div>
+                    <div style={st.budgetLabel}>{b.label}</div>
+                    <div style={st.budgetDate}>{FULL_MONTHS[b.month]} {b.year}</div>
+                  </div>
+                  <button style={st.deleteBtn} onClick={() => upd(s => { s.budgets = s.budgets.filter(x => x.id !== b.id); })}>✕</button>
+                </div>
+                <div style={st.budgetAmt}>{fmt(b.amount)}</div>
+                {b.note && <div style={st.budgetNote}>{b.note}</div>}
+              </div>
+            ))}
+          </div>
+          <div style={st.card}>
+            <div style={st.cardTitle}>Yeni Özel Bütçe</div>
+            <div style={st.formRow}>
+              <input style={st.input} placeholder="Bütçe adı (ör: Tatil)" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} />
+              <input style={st.input} type="number" placeholder="Tutar ₺" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+            </div>
+            <div style={st.formRow}>
+              <select style={st.select} value={form.month} onChange={e => setForm(f => ({ ...f, month: +e.target.value }))}>
+                {FULL_MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
+              </select>
+              <input style={st.input} type="number" placeholder="Yıl" value={form.year} onChange={e => setForm(f => ({ ...f, year: e.target.value }))} />
+              <input style={st.input} placeholder="Not (opsiyonel)" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} />
+              <button style={st.addBtn} onClick={addBudget}>+ Ekle</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── MAIN APP
+    function BudgetApp() {
+      const [state, setState] = useState(() => {
+        const saved = S.get("bütçe_app_v2", null);
+        return saved ? { ...defaultState(), ...saved } : defaultState();
+      });
+      const [toast, setToast] = useState(null);
+
+      useEffect(() => { S.set("bütçe_app_v2", state); }, [state]);
+      useEffect(() => {
+        if (toast) { const t = setTimeout(() => setToast(null), 3200); return () => clearTimeout(t); }
+      }, [toast]);
+
+      const showToast = (msg, type = "success") => setToast({ msg, type });
+      const upd = useCallback((fn) => setState(s => { const ns = { ...s }; fn(ns); return ns; }), []);
+
+      const requestNotif = async () => {
+        if ("Notification" in window) {
+          const res = await Notification.requestPermission();
+          upd(s => { s.notifGranted = res === "granted"; });
+          if (res === "granted") showToast("Bildirimler aktif! 🔔");
+        }
+      };
+
+      const togglePayment = (monthKey, itemId) => {
+        upd(s => {
+          if (!s.monthlyData[monthKey]) s.monthlyData = { ...s.monthlyData, [monthKey]: {} };
+          const md = { ...s.monthlyData[monthKey] };
+          const payments = { ...(md.payments || {}) };
+          payments[itemId] = !payments[itemId];
+          md.payments = payments;
+          s.monthlyData = { ...s.monthlyData, [monthKey]: md };
+        });
+        showToast("Ödeme durumu güncellendi ✓");
+      };
+
+      const todayDue = () => {
+        const d = now.getDate();
+        const key = getMonthKey(CY, CM);
+        const payments = state.monthlyData[key]?.payments || {};
+        const due = [];
+        state.expenseItems.filter(i => i.active && i.dueDay === d).forEach(i => { if (!payments[i.id]) due.push({ ...i, key }); });
+        state.creditCards.forEach(c => {
+          if (c.dueDay === d) due.push({ id: c.id, label: `${c.label} Son Ödeme`, key, isCard: true });
+          if (c.cutDay === d) due.push({ id: `cut_${c.id}`, label: `${c.label} Hesap Kesim`, key, isCard: true, isCut: true });
+        });
+        return due;
+      };
+
+      const tab = state.activeTab;
+      const setTab = (t) => upd(s => { s.activeTab = t; });
+
+      let cum = 0;
+      const forecastWithCumul = Array.from({ length: 12 }, (_, m) => {
+        const income = getMonthIncome(state, CY, m);
+        const expense = getMonthExpense(state, CY, m);
+        cum += income - expense;
+        return { m, income, expense, net: income - expense, cumulative: cum };
+      });
+
+      const due = todayDue();
+      const tabs = [
+        { id: "dashboard", icon: "◉", label: "Özet" },
+        { id: "income", icon: "↑", label: "Gelirler" },
+        { id: "expenses", icon: "↓", label: "Giderler" },
+        { id: "payments", icon: "✓", label: "Ödemeler" },
+        { id: "cards", icon: "▣", label: "Kartlar" },
+        { id: "assets", icon: "◈", label: "Varlıklar" },
+        { id: "forecast", icon: "⤴", label: "Projeksiyon" },
+        { id: "budgets", icon: "◎", label: "Bütçeler" },
+      ];
+
+      return (
+        <div style={st.root}>
+          <header style={st.header}>
+            <div style={st.headerLeft}>
+              <div style={st.logo}>₺</div>
+              <div>
+                <div style={st.appTitle}>Bütçe Defterim</div>
+                <div style={st.appSub}>{CY} · Kişisel Finans</div>
+              </div>
+            </div>
+            <div style={st.headerRight}>
+              {due.length > 0 && (
+                <div style={st.dueBadge} onClick={() => setTab("payments")}>🔔 {due.length} ödeme bugün</div>
+              )}
+              {!state.notifGranted && (
+                <button style={st.notifBtn} onClick={requestNotif}>Bildirimleri Aç</button>
+              )}
+            </div>
+          </header>
+
+          <nav style={st.nav}>
+            {tabs.map(t => (
+              <button key={t.id} style={{ ...st.navBtn, ...(tab === t.id ? st.navBtnActive : {}) }} onClick={() => setTab(t.id)}>
+                <span>{t.icon}</span>
+                <span>{t.label}</span>
+              </button>
+            ))}
+          </nav>
+
+          <main style={st.main}>
+            {tab === "dashboard" && <Dashboard state={state} forecastWithCumul={forecastWithCumul} due={due} togglePayment={togglePayment} upd={upd} />}
+            {tab === "income" && <IncomeTab state={state} upd={upd} showToast={showToast} />}
+            {tab === "expenses" && <ExpensesTab state={state} upd={upd} showToast={showToast} />}
+            {tab === "payments" && <PaymentsTab state={state} upd={upd} togglePayment={togglePayment} showToast={showToast} />}
+            {tab === "cards" && <CardsTab state={state} upd={upd} showToast={showToast} />}
+            {tab === "assets" && <AssetsTab state={state} upd={upd} showToast={showToast} />}
+            {tab === "forecast" && <ForecastTab forecastWithCumul={forecastWithCumul} />}
+            {tab === "budgets" && <BudgetsTab state={state} upd={upd} showToast={showToast} />}
+          </main>
+
+          {toast && (
+            <div style={{ ...st.toast, background: toast.type === "error" ? "#e63946" : "#2a9d8f" }}>{toast.msg}</div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<BudgetApp />);
+  </script>
+</body>
+</html>
