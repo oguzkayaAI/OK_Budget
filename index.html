@@ -213,14 +213,52 @@ async function loadFromD(token){const f=await findFile(token);if(!f)return null;
 
 // ─── LIVE PRICES
 async function fetchLivePrices(){
-  const fx=await fetch("https://api.frankfurter.app/latest?from=USD&to=TRY,EUR");
-  const fxd=await fx.json();
-  const usdTry=fxd.rates.TRY;
-  const eurTry=(1/fxd.rates.EUR)*usdTry;
-  const gold=await fetch("https://gold-api.com/price/XAU");
-  const goldd=await gold.json();
-  const gramTry=(goldd.price*usdTry)/31.1035;
-  return{gold_gram:Math.round(gramTry),usd:Math.round(usdTry*100)/100,eur:Math.round(eurTry*100)/100};
+  // 1. Döviz: frankfurter.app (ücretsiz, CORS açık)
+  let usdTry, eurTry;
+  try{
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(),8000);
+    const fx=await fetch("https://api.frankfurter.app/latest?from=USD&to=TRY,EUR",{signal:ctrl.signal});
+    clearTimeout(timer);
+    const fxd=await fx.json();
+    usdTry=fxd.rates.TRY;
+    eurTry=(1/fxd.rates.EUR)*usdTry;
+  }catch(e){
+    // Fallback: exchangerate-api (no key, CORS açık)
+    const ctrl2=new AbortController();
+    const timer2=setTimeout(()=>ctrl2.abort(),8000);
+    const fx2=await fetch("https://open.er-api.com/v6/latest/USD",{signal:ctrl2.signal});
+    clearTimeout(timer2);
+    const fxd2=await fx2.json();
+    usdTry=fxd2.rates.TRY;
+    eurTry=fxd2.rates.EUR*usdTry/fxd2.rates.EUR; // EUR/TRY
+    // düzgün hesap:
+    const eurUsd=1/fxd2.rates.EUR; // EUR/USD
+    eurTry=eurUsd*usdTry;
+  }
+
+  // 2. Altın: gold-api.com (ücretsiz, CORS açık, no key)
+  let gramTry;
+  try{
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(),8000);
+    const gold=await fetch("https://gold-api.com/price/XAU",{signal:ctrl.signal});
+    clearTimeout(timer);
+    const goldd=await gold.json();
+    gramTry=(goldd.price*usdTry)/31.1035;
+  }catch(e){
+    // Fallback: fiyatı dövizden tahmin et (1 ons ≈ son bilinen değer)
+    // Son önbellek değerini kullan, yoksa hesaplayamayız
+    const cached=S.get("cached_prices",null);
+    if(cached?.gold_gram) gramTry=cached.gold_gram;
+    else throw new Error("Altın fiyatı alınamadı");
+  }
+
+  return{
+    gold_gram:Math.round(gramTry),
+    usd:Math.round(usdTry*100)/100,
+    eur:Math.round(eurTry*100)/100
+  };
 }
 
 // ─── NOTIFICATIONS
@@ -581,10 +619,15 @@ function AssetsTab({state,upd}){
       setLastFetch(t);S.set("last_price_fetch",t);
       S.set("last_price_fetch_ts",Date.now());
     }catch(e){
-      // İnternet yoksa cache'ten devam et
+      console.error("Fiyat çekme hatası:",e);
+      // İnternet yoksa veya API hatalıysa cache'ten devam et
       const cached=S.get("cached_prices",null);
-      if(cached){upd(st=>{st.prices={...st.prices,...cached};});setOffline(true);}
-      else setFetchError("Fiyat alınamadı ve önbellekte de yok.");
+      if(cached){
+        upd(st=>{st.prices={...st.prices,...cached};});
+        setOffline(true);
+      } else {
+        setFetchError(`Bağlanamadı: ${e.message}`);
+      }
     }
     setLoading(false);
   };
