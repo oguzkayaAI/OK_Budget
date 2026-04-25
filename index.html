@@ -96,23 +96,29 @@ function dSave(t,data){var body=JSON.stringify(data);return dFind(t).then(functi
 function dLoad(t){return dFind(t).then(function(f){if(!f)return null;return fetch("https://www.googleapis.com/drive/v3/files/"+f.id+"?alt=media",{headers:{Authorization:"Bearer "+t}}).then(function(r){return r.json()})})}
 
 function fetchPrices(){
-  return fetch("https://api.frankfurter.app/latest?from=USD&to=TRY,EUR")
+  // Önce open.er-api (daha güncel TRY kuru)
+  return fetch("https://open.er-api.com/v6/latest/USD")
     .then(function(r){return r.json()})
     .then(function(d){
       var usd=d.rates.TRY;
-      var eur=(1/d.rates.EUR)*usd;
+      var eur=d.rates.TRY/d.rates.EUR; // EUR/TRY
       return fetch("https://gold-api.com/price/XAU").then(function(r){return r.json()}).then(function(g){
-        return {usd:Math.round(usd*100)/100,eur:Math.round(eur*100)/100,gold_gram:Math.round(g.price*usd/31.1035)};
+        return {usd:Math.round(usd*100)/100, eur:Math.round(eur*100)/100, gold_gram:Math.round(g.price*usd/31.1035)};
       }).catch(function(){
         var c=LS.get("cached_prices",null);
-        return {usd:Math.round(usd*100)/100,eur:Math.round(eur*100)/100,gold_gram:c?c.gold_gram:null};
+        return {usd:Math.round(usd*100)/100, eur:Math.round(eur*100)/100, gold_gram:c?c.gold_gram:null};
       });
     })
     .catch(function(){
-      return fetch("https://open.er-api.com/v6/latest/USD").then(function(r){return r.json()}).then(function(d){
-        var usd=d.rates.TRY;var eur=(1/d.rates.EUR)*usd;var c=LS.get("cached_prices",null);
-        return {usd:Math.round(usd*100)/100,eur:Math.round(eur*100)/100,gold_gram:c?c.gold_gram:null};
-      });
+      // Fallback: frankfurter
+      return fetch("https://api.frankfurter.app/latest?from=USD&to=TRY,EUR")
+        .then(function(r){return r.json()})
+        .then(function(d){
+          var usd=d.rates.TRY;
+          var eur=(1/d.rates.EUR)*usd;
+          var c=LS.get("cached_prices",null);
+          return {usd:Math.round(usd*100)/100, eur:Math.round(eur*100)/100, gold_gram:c?c.gold_gram:null};
+        });
     });
 }
 
