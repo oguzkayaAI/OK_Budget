@@ -4,8 +4,8 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Bütçe Defterim</title>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -20,6 +20,7 @@ input,select,button{font-family:inherit;outline:none}
 <script>
 window.onerror=function(m,s,l,c,err){var d=document.getElementById('ERR');d.style.display='block';d.textContent='HATA:\n'+m+'\nSatır:'+l+'\n'+(err&&err.stack?err.stack:'');return false};
 window.addEventListener('unhandledrejection',function(ev){var d=document.getElementById('ERR');d.style.display='block';d.textContent+=(d.textContent?'\n\n':'')+('Promise Hatası:\n'+(ev.reason&&ev.reason.stack?ev.reason.stack:String(ev.reason)))});
+window.addEventListener('load',function(){
 </script>
 <script>
 'use strict';
@@ -760,6 +761,7 @@ function App(){
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+}); // end window load
 </script>
 </body>
 </html>
