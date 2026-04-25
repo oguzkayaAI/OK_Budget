@@ -6,671 +6,339 @@
 <title>Bütçe Defterim</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:#0f0f13;font-family:'Segoe UI',sans-serif;color:#e8e8e8}
+body{background:#0f0f13;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e8e8e8;font-size:14px}
 input,select,button{font-family:inherit;outline:none}
-::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
-@keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 </style>
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel">
-const {useState,useEffect,useCallback,useRef} = React;
+<script>
+'use strict';
+const e = React.createElement;
+const {useState, useEffect, useCallback, useRef} = React;
 
+// ── Config
 const CLIENT_ID = "629470119329-cqv2csvgkcgbna6lh3vggdaii1uf2gcb.apps.googleusercontent.com";
 const SCOPES    = "https://www.googleapis.com/auth/drive.appdata";
-const FILE_NAME = "butce_v5.json";
+const FILE_NAME = "butce_v6.json";
 
-// ── localStorage yardımcıları
+// ── LocalStorage
 const LS = {
-  get:(k,d)=>{ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch{return d;} },
-  set:(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} }
+  get:(k,d)=>{ try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d} },
+  set:(k,v)=>{ try{localStorage.setItem(k,JSON.stringify(v))}catch{} }
 };
 
+// ── Constants
 const MONTHS      = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
 const FULL_MONTHS = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
 const NOW = new Date();
-const CY  = NOW.getFullYear();
-const CM  = NOW.getMonth();
-const CD  = NOW.getDate();
+const CY = NOW.getFullYear(), CM = NOW.getMonth(), CD = NOW.getDate();
 const TODAY = NOW.toISOString().slice(0,10);
 
-function uid(){ return Math.random().toString(36).slice(2,9); }
+const GOLD_W = {gold_gram:1, gold_quarter:1.75, gold_half:3.5, gold_full:7};
+const INV_TYPES = {gold_gram:"Gram Altın",gold_quarter:"Çeyrek Altın",gold_half:"Yarım Altın",gold_full:"Tam Altın",deposit_try:"Vadeli Mevduat (TL)",deposit_usd:"Vadeli Mevduat (USD)",deposit_eur:"Vadeli Mevduat (EUR)",fund:"Yatırım Fonu",stock:"Hisse",crypto:"Kripto",other:"Diğer"};
+const INC_TYPES = {salary:"Maaş",rent_income:"Kira Geliri",interest:"Faiz",freelance:"Serbest",dividend:"Temettü",other_income:"Diğer"};
+const EXP_TYPES = {fixed:"Sabit",variable:"Değişken",installment:"Taksit/Kredi",credit_card:"Kredi Kartı",rent:"Kira",subscription:"Abonelik",other_expense:"Diğer"};
 
-// ── Sabitler
-const GOLD_W = { gold_gram:1, gold_quarter:1.75, gold_half:3.5, gold_full:7 };
+function uid(){ return Math.random().toString(36).slice(2,9) }
 
-const INV_TYPES = {
-  gold_gram:"Gram Altın", gold_quarter:"Çeyrek Altın",
-  gold_half:"Yarım Altın", gold_full:"Tam Altın",
-  deposit_try:"Vadeli Mevduat (TL)", deposit_usd:"Vadeli Mevduat (USD)",
-  deposit_eur:"Vadeli Mevduat (EUR)",
-  fund:"Yatırım Fonu", stock:"Hisse", crypto:"Kripto", other:"Diğer"
-};
-
-const INC_TYPES = {
-  salary:"Maaş", rent_income:"Kira Geliri", interest:"Faiz",
-  freelance:"Serbest", dividend:"Temettü", other_income:"Diğer"
-};
-
-const EXP_TYPES = {
-  fixed:"Sabit", variable:"Değişken", installment:"Taksit/Kredi",
-  credit_card:"Kredi Kartı", rent:"Kira", subscription:"Abonelik", other_expense:"Diğer"
-};
-
-// ── Varsayılan state
-const mkDefault = () => ({
-  incomeItems:[
-    {id:uid(),label:"Maaş",type:"salary",amount:0,active:true,incomeDay:1},
-    {id:uid(),label:"Kira Geliri",type:"rent_income",amount:0,active:true,incomeDay:5},
-    {id:uid(),label:"Faiz Geliri",type:"interest",amount:0,active:true,incomeDay:10},
-  ],
-  expenseItems:[
-    {id:uid(),label:"Kira",type:"fixed",amount:0,active:true,dueDay:1,remaining:0},
-    {id:uid(),label:"Kredi",type:"installment",amount:0,active:true,dueDay:15,remaining:0},
-    {id:uid(),label:"Kredi Kartı",type:"credit_card",amount:0,active:true,dueDay:10,remaining:0},
-  ],
-  creditCards:[
-    {id:uid(),label:"Kart 1",limit:0,cutDay:25,dueDay:10,color:"#e63946"}
-  ],
-  assets:{ cash_try:0, cash_usd:0, cash_eur:0, other:0 },
-  portfolio:[],
-  budgets:[],
-  monthlyData:{},
-  prices:{ gold_gram:3200, usd:38, eur:42 },
-  activeTab:"dashboard",
-});
-
-// ── Hesaplama fonksiyonları
-function mkey(y,m){ return y+"-"+m; }
-
-function portfolioVal(portfolio,prices){
-  return (portfolio||[]).reduce((sum,pos)=>{
-    if(!pos.active) return sum;
-    if(pos.type.startsWith("gold_")){
-      return sum + pos.quantity*(GOLD_W[pos.type]||1)*prices.gold_gram;
-    }
-    if(pos.type==="deposit_try"){
-      return sum + pos.principal*(1+(pos.rate||0)/100*(pos.days||365)/365);
-    }
-    if(pos.type==="deposit_usd"){
-      return sum + pos.principal*(1+(pos.rate||0)/100*(pos.days||365)/365)*prices.usd;
-    }
-    if(pos.type==="deposit_eur"){
-      return sum + pos.principal*(1+(pos.rate||0)/100*(pos.days||365)/365)*prices.eur;
-    }
-    return sum + (pos.currentValue||pos.principal||0);
-  },0);
-}
-
-function netWorth(state){
-  const a=state.assets, p=state.prices;
-  return a.cash_try + a.cash_usd*p.usd + a.cash_eur*p.eur + a.other
-       + portfolioVal(state.portfolio,p);
-}
-
-function monthIncome(state,y,m){
-  const ov=(state.monthlyData[mkey(y,m)]||{}).incomeOverrides||{};
-  return state.incomeItems.filter(i=>i.active)
-    .reduce((s,i)=>s+(ov[i.id]!==undefined?ov[i.id]:i.amount),0);
-}
-
-function monthExpense(state,y,m){
-  const ov=(state.monthlyData[mkey(y,m)]||{}).expenseOverrides||{};
-  const bt=(state.budgets||[]).filter(b=>b.year===y&&b.month===m)
-    .reduce((s,b)=>s+b.amount,0);
-  return state.expenseItems.filter(i=>i.active)
-    .reduce((s,i)=>s+(ov[i.id]!==undefined?ov[i.id]:i.amount),0)+bt;
-}
-
-function fmt(n){
-  if(n==null||n===undefined) return "—";
-  return new Intl.NumberFormat("tr-TR",{style:"currency",currency:"TRY",maximumFractionDigits:0}).format(n);
-}
-
-function daysDiff(dateStr){
-  if(!dateStr) return null;
-  return Math.round((new Date(dateStr)-NOW)/(864e5));
-}
-
-function daysLeft(day){
-  return ((day-CD+31)%31)||31;
-}
-
-// ── Google Drive
-async function driveFindFile(token){
-  const r=await fetch(
-    "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='"+FILE_NAME+"'&fields=files(id)",
-    {headers:{Authorization:"Bearer "+token}}
-  );
-  const d=await r.json();
-  return (d.files||[])[0]||null;
-}
-
-async function driveSave(token,data){
-  const body=JSON.stringify(data);
-  const ex=await driveFindFile(token);
-  if(ex){
-    await fetch("https://www.googleapis.com/upload/drive/v3/files/"+ex.id+"?uploadType=media",
-      {method:"PATCH",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body});
-  } else {
-    const m=await fetch("https://www.googleapis.com/drive/v3/files?fields=id",
-      {method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},
-       body:JSON.stringify({name:FILE_NAME,parents:["appDataFolder"]})});
-    const {id}=await m.json();
-    await fetch("https://www.googleapis.com/upload/drive/v3/files/"+id+"?uploadType=media",
-      {method:"PATCH",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body});
-  }
-}
-
-async function driveLoad(token){
-  const f=await driveFindFile(token);
-  if(!f) return null;
-  const r=await fetch("https://www.googleapis.com/drive/v3/files/"+f.id+"?alt=media",
-    {headers:{Authorization:"Bearer "+token}});
-  return r.json();
-}
-
-// ── Canlı fiyat
-async function fetchPrices(){
-  // Döviz — önce frankfurter, sonra open.er-api
-  let usd,eur;
-  try{
-    const r=await fetch("https://api.frankfurter.app/latest?from=USD&to=TRY,EUR");
-    const d=await r.json();
-    usd=d.rates.TRY;
-    eur=(1/d.rates.EUR)*usd;
-  } catch(_){
-    const r=await fetch("https://open.er-api.com/v6/latest/USD");
-    const d=await r.json();
-    usd=d.rates.TRY;
-    eur=(1/d.rates.EUR)*usd;
-  }
-  // Altın — gold-api.com
-  let gold_gram;
-  try{
-    const r=await fetch("https://gold-api.com/price/XAU");
-    const d=await r.json();
-    gold_gram=Math.round(d.price*usd/31.1035);
-  } catch(_){
-    const cached=LS.get("cached_prices",null);
-    gold_gram=cached?cached.gold_gram:null;
-  }
+function mkDefault(){
   return {
-    usd:   Math.round(usd*100)/100,
-    eur:   Math.round(eur*100)/100,
-    gold_gram
+    incomeItems:[
+      {id:uid(),label:"Maaş",type:"salary",amount:0,active:true,incomeDay:1},
+      {id:uid(),label:"Kira Geliri",type:"rent_income",amount:0,active:true,incomeDay:5},
+      {id:uid(),label:"Faiz Geliri",type:"interest",amount:0,active:true,incomeDay:10},
+    ],
+    expenseItems:[
+      {id:uid(),label:"Kira",type:"fixed",amount:0,active:true,dueDay:1,remaining:0},
+      {id:uid(),label:"Kredi",type:"installment",amount:0,active:true,dueDay:15,remaining:0},
+      {id:uid(),label:"Kredi Kartı",type:"credit_card",amount:0,active:true,dueDay:10,remaining:0},
+    ],
+    creditCards:[{id:uid(),label:"Kart 1",limit:0,cutDay:25,dueDay:10,color:"#e63946"}],
+    assets:{cash_try:0,cash_usd:0,cash_eur:0,other:0},
+    portfolio:[],
+    budgets:[],
+    monthlyData:{},
+    prices:{gold_gram:3200,usd:38,eur:42},
+    activeTab:"dashboard",
   };
 }
 
-// ── Bildirimler
-function notify(title,body){
-  if(Notification.permission==="granted") new Notification(title,{body});
+// ── Helpers
+function mkey(y,m){ return y+"-"+m }
+function fmt(n){ if(n==null)return"—"; return new Intl.NumberFormat("tr-TR",{style:"currency",currency:"TRY",maximumFractionDigits:0}).format(n) }
+function dLeft(day){ return ((day-CD+31)%31)||31 }
+function dDiff(ds){ if(!ds)return null; return Math.round((new Date(ds)-NOW)/864e5) }
+
+function posVal(pos, prices){
+  if(pos.type.startsWith("gold_")) return pos.quantity*(GOLD_W[pos.type]||1)*prices.gold_gram;
+  if(pos.type==="deposit_try") return pos.principal*(1+(pos.rate||0)/100*(pos.days||365)/365);
+  if(pos.type==="deposit_usd") return pos.principal*(1+(pos.rate||0)/100*(pos.days||365)/365)*prices.usd;
+  if(pos.type==="deposit_eur") return pos.principal*(1+(pos.rate||0)/100*(pos.days||365)/365)*prices.eur;
+  return pos.currentValue||pos.principal||0;
+}
+function portVal(portfolio, prices){ return (portfolio||[]).filter(p=>p.active).reduce((s,p)=>s+posVal(p,prices),0) }
+function nWorth(state){ const a=state.assets,p=state.prices; return a.cash_try+a.cash_usd*p.usd+a.cash_eur*p.eur+a.other+portVal(state.portfolio,p) }
+function mIncome(state,y,m){ const ov=((state.monthlyData[mkey(y,m)]||{}).incomeOverrides)||{}; return state.incomeItems.filter(i=>i.active).reduce((s,i)=>s+(ov[i.id]!=null?ov[i.id]:i.amount),0) }
+function mExpense(state,y,m){ const ov=((state.monthlyData[mkey(y,m)]||{}).expenseOverrides)||{}; const bt=(state.budgets||[]).filter(b=>b.year===y&&b.month===m).reduce((s,b)=>s+b.amount,0); return state.expenseItems.filter(i=>i.active).reduce((s,i)=>s+(ov[i.id]!=null?ov[i.id]:i.amount),0)+bt }
+
+// ── Drive
+async function dFind(t){ const r=await fetch("https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D'"+FILE_NAME+"'&fields=files(id)",{headers:{Authorization:"Bearer "+t}}); const d=await r.json(); return (d.files||[])[0]||null }
+async function dSave(t,data){ const body=JSON.stringify(data); const ex=await dFind(t); if(ex){ await fetch("https://www.googleapis.com/upload/drive/v3/files/"+ex.id+"?uploadType=media",{method:"PATCH",headers:{Authorization:"Bearer "+t,"Content-Type":"application/json"},body}) } else { const m=await fetch("https://www.googleapis.com/drive/v3/files?fields=id",{method:"POST",headers:{Authorization:"Bearer "+t,"Content-Type":"application/json"},body:JSON.stringify({name:FILE_NAME,parents:["appDataFolder"]})}); const {id}=await m.json(); await fetch("https://www.googleapis.com/upload/drive/v3/files/"+id+"?uploadType=media",{method:"PATCH",headers:{Authorization:"Bearer "+t,"Content-Type":"application/json"},body}) } }
+async function dLoad(t){ const f=await dFind(t); if(!f)return null; const r=await fetch("https://www.googleapis.com/drive/v3/files/"+f.id+"?alt=media",{headers:{Authorization:"Bearer "+t}}); return r.json() }
+
+// ── Live prices
+async function fetchPrices(){
+  let usd,eur;
+  try{ const r=await fetch("https://api.frankfurter.app/latest?from=USD&to=TRY,EUR"); const d=await r.json(); usd=d.rates.TRY; eur=(1/d.rates.EUR)*usd }
+  catch{ const r=await fetch("https://open.er-api.com/v6/latest/USD"); const d=await r.json(); usd=d.rates.TRY; eur=(1/d.rates.EUR)*usd }
+  let gold_gram;
+  try{ const r=await fetch("https://gold-api.com/price/XAU"); const d=await r.json(); gold_gram=Math.round(d.price*usd/31.1035) }
+  catch{ const c=LS.get("cached_prices",null); gold_gram=c?c.gold_gram:null }
+  return {usd:Math.round(usd*100)/100, eur:Math.round(eur*100)/100, gold_gram}
 }
 
+// ── Notifications
+function notify(title,body){ if(Notification.permission==="granted") new Notification(title,{body}) }
 function checkNotifs(state){
   const k=mkey(CY,CM);
-  const pay=(state.monthlyData[k]||{}).payments||{};
-  const ic=(state.monthlyData[k]||{}).incomeCollected||{};
-  state.expenseItems.filter(i=>i.active&&i.dueDay===CD&&!pay[i.id])
-    .forEach(i=>notify("💸 Ödeme Vadesi!",i.label+" · "+fmt(i.amount)));
-  state.incomeItems.filter(i=>i.active&&i.incomeDay===CD&&!ic[i.id])
-    .forEach(i=>notify("💰 Gelir Günü!",i.label+" · "+fmt(i.amount)));
-  state.creditCards.forEach(c=>{
-    if(c.cutDay===CD) notify("✂️ Hesap Kesim!",c.label+" bugün kesiliyor");
-    if(c.dueDay===CD) notify("💳 Son Ödeme!",c.label+" son ödeme günü bugün");
-    if(daysLeft(c.dueDay)===3) notify("⚠️ Kart Uyarısı",c.label+" için 3 gün kaldı");
-  });
-  (state.portfolio||[]).filter(p=>p.active&&p.maturityDate).forEach(pos=>{
-    const d=daysDiff(pos.maturityDate);
-    if(d===0) notify("🏦 Vade Bugün!",pos.label+" vadesi bugün");
-    if(d===1) notify("⚠️ Yarın Vade!",pos.label+" yarın vadesi doluyor");
-    if(d===3) notify("🔔 Vade Yaklaşıyor",pos.label+" vadesine 3 gün kaldı");
-  });
+  const pays=((state.monthlyData[k]||{}).payments)||{};
+  const ic=((state.monthlyData[k]||{}).incomeCollected)||{};
+  state.expenseItems.filter(i=>i.active&&i.dueDay===CD&&!pays[i.id]).forEach(i=>notify("💸 Ödeme Vadesi!",i.label+" · "+fmt(i.amount)));
+  state.incomeItems.filter(i=>i.active&&i.incomeDay===CD&&!ic[i.id]).forEach(i=>notify("💰 Gelir Günü!",i.label+" · "+fmt(i.amount)));
+  state.creditCards.forEach(c=>{ if(c.cutDay===CD)notify("✂️ Hesap Kesim!",c.label); if(c.dueDay===CD)notify("💳 Son Ödeme!",c.label); if(dLeft(c.dueDay)===3)notify("⚠️ Kart Uyarısı",c.label+" için 3 gün kaldı") });
+  (state.portfolio||[]).filter(p=>p.active&&p.maturityDate).forEach(pos=>{ const d=dDiff(pos.maturityDate); if(d===0)notify("🏦 Vade Bugün!",pos.label); if(d===1)notify("⏰ Yarın Vade!",pos.label); if(d===3)notify("🔔 3 Gün Kaldı",pos.label) });
 }
 
-// ══════════════════════════════════════════════
-// STYLES
-// ══════════════════════════════════════════════
-const C = {
-  root:     {minHeight:"100vh",background:"#0f0f13",color:"#e8e8e8",fontSize:14},
-  header:   {display:"flex",justifyContent:"space-between",alignItems:"center",
-             padding:"13px 18px",background:"rgba(255,255,255,.04)",
-             borderBottom:"1px solid rgba(255,255,255,.08)",
-             position:"sticky",top:0,zIndex:100,flexWrap:"wrap",gap:8},
-  hL:       {display:"flex",alignItems:"center",gap:12},
-  logo:     {width:38,height:38,borderRadius:11,
-             background:"linear-gradient(135deg,#e9c46a,#f4a261)",
-             display:"flex",alignItems:"center",justifyContent:"center",
-             fontSize:19,fontWeight:900,color:"#0f0f13",flexShrink:0},
-  hR:       {display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"},
-  syncBar:  {fontSize:11,padding:"6px 16px",
-             background:"rgba(42,157,143,.07)",
-             borderBottom:"1px solid rgba(42,157,143,.14)",
-             display:"flex",alignItems:"center",gap:8,color:"#2a9d8f"},
-  nav:      {display:"flex",overflowX:"auto",gap:2,padding:"5px 12px",
-             background:"rgba(255,255,255,.02)",
-             borderBottom:"1px solid rgba(255,255,255,.06)"},
-  main:     {padding:"18px 15px",maxWidth:980,margin:"0 auto"},
-  // cards
-  card:     {background:"rgba(255,255,255,.04)",borderRadius:14,
-             padding:"15px 17px",border:"1px solid rgba(255,255,255,.07)"},
-  ctitle:   {fontSize:11,fontWeight:700,color:"#aaa",marginBottom:11,
-             textTransform:"uppercase",letterSpacing:"0.5px"},
-  kgrid:    {display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",gap:11},
-  kcard:    {background:"rgba(255,255,255,.05)",borderRadius:13,padding:"14px"},
-  r2:       {display:"grid",gridTemplateColumns:"1fr 1fr",gap:13},
-  // list rows
-  lrow:     {display:"flex",justifyContent:"space-between",alignItems:"center",
-             padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.06)"},
-  irow:     {display:"flex",justifyContent:"space-between",
-             padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,.05)"},
-  prow:     {display:"flex",justifyContent:"space-between",alignItems:"center",
-             padding:"10px 12px",borderRadius:10,marginBottom:6},
-  drow:     {display:"flex",justifyContent:"space-between",alignItems:"center",
-             padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.06)"},
-  // inputs
-  inp:      {flex:1,minWidth:105,padding:"8px 10px",borderRadius:8,
-             background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.12)",
-             color:"#f0f0f0",fontSize:12},
-  sel:      {flex:1,minWidth:120,padding:"8px 10px",borderRadius:8,
-             background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.12)",
-             color:"#f0f0f0",fontSize:12},
-  ainp:     {width:84,padding:"5px 7px",borderRadius:7,
-             background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.1)",
-             color:"#f0f0f0",fontSize:12,fontWeight:600,textAlign:"right"},
-  dinp:     {width:46,padding:"5px 5px",borderRadius:7,
-             background:"rgba(233,196,106,.1)",border:"1px solid rgba(233,196,106,.3)",
-             color:"#e9c46a",fontSize:12,fontWeight:700,textAlign:"center"},
-  frow:     {display:"flex",gap:8,flexWrap:"wrap",marginBottom:8},
-  addbtn:   {padding:"8px 14px",borderRadius:8,
-             background:"linear-gradient(135deg,#e9c46a,#f4a261)",
-             border:"none",color:"#0f0f13",fontWeight:800,cursor:"pointer",fontSize:12},
-  delbtn:   {background:"rgba(230,57,70,.2)",border:"none",color:"#e63946",
-             width:26,height:26,borderRadius:6,cursor:"pointer",fontSize:11},
-  pbtn:     {padding:"6px 12px",borderRadius:7,border:"none",
-             color:"#fff",fontWeight:700,cursor:"pointer",fontSize:11},
-  // table
-  tbl:      {width:"100%",borderCollapse:"collapse",fontSize:12},
-  th:       {padding:"7px 10px",textAlign:"right",color:"#888",fontSize:10,
-             fontWeight:700,borderBottom:"1px solid rgba(255,255,255,.08)"},
-  td:       {padding:"7px 10px",textAlign:"right",
-             borderBottom:"1px solid rgba(255,255,255,.05)"},
-  // chart
-  bc:       {display:"flex",gap:5,alignItems:"flex-end",height:120,marginTop:8},
-  bg:       {flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3},
-  bp:       {width:"100%",display:"flex",gap:2,alignItems:"flex-end",height:95},
-  bar:      {flex:1,borderRadius:"3px 3px 0 0",minHeight:3},
-  mb:       {display:"flex",gap:3,alignItems:"flex-end",height:65},
-  mbg:      {flex:1,display:"flex",flexDirection:"column",alignItems:"center",height:"100%"},
-  // credit card
-  cgrid:    {display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:12},
-  cc:       {borderRadius:14,padding:"16px",color:"#fff",boxShadow:"0 8px 32px rgba(0,0,0,.4)"},
-  // misc
-  empty:    {color:"#666",fontSize:12,padding:"10px 0",textAlign:"center"},
-  tag:      {background:"rgba(233,196,106,.25)",color:"#e9c46a",fontSize:9,fontWeight:800,
-             padding:"2px 5px",borderRadius:4,marginLeft:6,verticalAlign:"middle"},
-  utag:     {background:"rgba(230,57,70,.25)",color:"#ff8a80",fontSize:9,fontWeight:800,
-             padding:"2px 5px",borderRadius:4,marginLeft:6,verticalAlign:"middle"},
-  toast:    {position:"fixed",bottom:20,right:20,zIndex:9999,
-             padding:"10px 16px",borderRadius:11,fontWeight:700,
-             color:"#fff",fontSize:13,boxShadow:"0 8px 32px rgba(0,0,0,.4)",
-             animation:"fadein .2s ease"},
-  msel:     {display:"flex",gap:5,flexWrap:"wrap"},
-  mbtn:     {padding:"5px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,.1)",
-             background:"transparent",color:"#888",cursor:"pointer",fontSize:11},
-  mbtnA:    {background:"rgba(233,196,106,.2)",color:"#e9c46a",fontWeight:700,
-             borderColor:"rgba(233,196,106,.4)"},
+// ── Styles (plain objects, no JSX)
+const S = {
+  card: {background:"rgba(255,255,255,.05)",borderRadius:14,padding:"14px 16px",border:"1px solid rgba(255,255,255,.07)",marginBottom:12},
+  ctitle: {fontSize:11,fontWeight:700,color:"#aaa",marginBottom:10,textTransform:"uppercase",letterSpacing:"0.5px"},
+  inp: {flex:1,minWidth:100,padding:"8px 10px",borderRadius:8,background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.12)",color:"#f0f0f0",fontSize:12},
+  sel: {flex:1,minWidth:120,padding:"8px 10px",borderRadius:8,background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.12)",color:"#f0f0f0",fontSize:12},
+  addbtn: {padding:"8px 14px",borderRadius:8,background:"linear-gradient(135deg,#e9c46a,#f4a261)",border:"none",color:"#0f0f13",fontWeight:800,cursor:"pointer",fontSize:12,flexShrink:0},
+  delbtn: {background:"rgba(230,57,70,.2)",border:"none",color:"#e63946",width:26,height:26,borderRadius:6,cursor:"pointer",fontSize:11,flexShrink:0},
+  pbtn: (bg,fg) => ({padding:"6px 12px",borderRadius:7,border:"none",background:bg,color:fg||"#fff",fontWeight:700,cursor:"pointer",fontSize:11,whiteSpace:"nowrap"}),
+  prow: (bg) => ({display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",borderRadius:10,marginBottom:6,background:bg||"rgba(255,255,255,.03)"}),
+  lrow: {display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.06)"},
+  irow: {display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,.05)"},
+  ainp: {width:82,padding:"5px 7px",borderRadius:7,background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.1)",color:"#f0f0f0",fontSize:12,fontWeight:600,textAlign:"right"},
+  dinp: {width:44,padding:"5px 5px",borderRadius:7,background:"rgba(233,196,106,.1)",border:"1px solid rgba(233,196,106,.3)",color:"#e9c46a",fontSize:12,fontWeight:700,textAlign:"center"},
+  frow: {display:"flex",gap:8,flexWrap:"wrap",marginBottom:8},
+  kgrid: {display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:12},
+  r2: {display:"grid",gridTemplateColumns:"1fr 1fr",gap:12},
+  tbl: {width:"100%",borderCollapse:"collapse",fontSize:12},
+  th: (c) => ({padding:"7px 9px",textAlign:"right",color:c||"#888",fontSize:10,fontWeight:700,borderBottom:"1px solid rgba(255,255,255,.08)"}),
+  td: {padding:"7px 9px",textAlign:"right",borderBottom:"1px solid rgba(255,255,255,.05)"},
+  tag: {display:"inline-block",background:"rgba(233,196,106,.25)",color:"#e9c46a",fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:4,marginLeft:6,verticalAlign:"middle"},
+  utag: {display:"inline-block",background:"rgba(230,57,70,.25)",color:"#ff8a80",fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:4,marginLeft:6,verticalAlign:"middle"},
 };
 
-function btn(bg,color,border){
-  return {padding:"5px 11px",borderRadius:8,fontSize:12,cursor:"pointer",
-          border:"1px solid "+border,background:bg,color,fontWeight:700};
-}
-function badge(bg,border,color){
-  return {background:bg,border:"1px solid "+border,color,
-          padding:"5px 10px",borderRadius:20,fontSize:12,cursor:"pointer",fontWeight:600};
-}
-function tbanner(c){
-  return {padding:"10px 14px",borderRadius:11,background:c+"22",
-          border:"1px solid "+c+"44",color:c,fontWeight:700,fontSize:15};
-}
-function togBtn(active){
-  return {width:19,height:19,border:"none",background:"none",
-          color:active?"#2a9d8f":"#555",cursor:"pointer",fontSize:15,padding:0};
-}
-
-// ── Shared components
 function KCard({label,value,color,icon}){
-  return (
-    <div style={{...C.kcard,borderTop:"3px solid "+color}}>
-      <div style={{fontSize:18,marginBottom:6,color}}>{icon}</div>
-      <div style={{fontSize:16,fontWeight:800}}>{value}</div>
-      <div style={{fontSize:10,color:"#888",marginTop:3}}>{label}</div>
-    </div>
+  return e("div",{style:{background:"rgba(255,255,255,.05)",borderRadius:13,padding:"13px 14px",borderTop:"3px solid "+color}},
+    e("div",{style:{fontSize:18,marginBottom:5,color}},icon),
+    e("div",{style:{fontSize:15,fontWeight:800}},value),
+    e("div",{style:{fontSize:10,color:"#888",marginTop:3}},label)
   );
 }
 
 function MiniBar({data}){
   const max=Math.max(...data.map(r=>Math.max(r.inc,r.exp)),1);
-  return (
-    <div style={C.mb}>
-      {data.map((row,i)=>(
-        <div key={i} style={C.mbg}>
-          <div style={{flex:1,display:"flex",alignItems:"flex-end",gap:1}}>
-            <div style={{flex:1,height:Math.round((row.inc/max)*52)+"px",background:"#2a9d8f",borderRadius:"2px 2px 0 0",minHeight:2}}/>
-            <div style={{flex:1,height:Math.round((row.exp/max)*52)+"px",background:"#e63946",borderRadius:"2px 2px 0 0",minHeight:2}}/>
-          </div>
-          <div style={{fontSize:8,color:"#888",marginTop:2}}>{MONTHS[i]}</div>
-        </div>
-      ))}
-    </div>
+  return e("div",{style:{display:"flex",gap:3,alignItems:"flex-end",height:60}},
+    data.map((row,i)=>e("div",{key:i,style:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",height:"100%"}},
+      e("div",{style:{flex:1,display:"flex",alignItems:"flex-end",gap:1,width:"100%"}},
+        e("div",{style:{flex:1,height:Math.round((row.inc/max)*50)+"px",background:"#2a9d8f",borderRadius:"2px 2px 0 0",minHeight:2}}),
+        e("div",{style:{flex:1,height:Math.round((row.exp/max)*50)+"px",background:"#e63946",borderRadius:"2px 2px 0 0",minHeight:2}})
+      ),
+      e("div",{style:{fontSize:8,color:"#888",marginTop:2}},MONTHS[i])
+    ))
   );
 }
 
-// ══ DASHBOARD ══════════════════════════════════
+// ── DASHBOARD
 function Dashboard({state,forecast,due,todayInc,togglePay,toggleInc}){
   const p=state.prices;
-  const tm=forecast[CM]||{inc:0,exp:0,net:0};
-  const nw=netWorth(state);
-  const pv=portfolioVal(state.portfolio,p);
-  const upcoming=(state.portfolio||[])
-    .filter(pos=>pos.active&&pos.maturityDate&&daysDiff(pos.maturityDate)>=0&&daysDiff(pos.maturityDate)<=3)
-    .sort((a,b)=>daysDiff(a.maturityDate)-daysDiff(b.maturityDate));
+  const tm=forecast[CM]||{inc:0,exp:0,net:0,cum:0};
+  const nw=nWorth(state);
+  const pv=portVal(state.portfolio,p);
+  const upcoming=(state.portfolio||[]).filter(pos=>pos.active&&pos.maturityDate&&dDiff(pos.maturityDate)>=0&&dDiff(pos.maturityDate)<=3).sort((a,b)=>dDiff(a.maturityDate)-dDiff(b.maturityDate));
 
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{fontSize:18,fontWeight:800,letterSpacing:"-0.5px"}}>Bu Ay · {FULL_MONTHS[CM]} {CY}</div>
-
-      <div style={C.kgrid}>
-        <KCard label="Aylık Gelir"    value={fmt(tm.inc)} color="#2a9d8f" icon="↑"/>
-        <KCard label="Aylık Gider"    value={fmt(tm.exp)} color="#e63946" icon="↓"/>
-        <KCard label="Net Tasarruf"   value={fmt(tm.net)} color={tm.net>=0?"#2a9d8f":"#e63946"} icon="="/>
-        <KCard label="Toplam Varlık"  value={fmt(nw)}     color="#e9c46a" icon="◈"/>
-        <KCard label="Portföy"        value={fmt(pv)}     color="#f4a261" icon="📊"/>
-      </div>
-
-      {upcoming.length>0&&(
-        <div style={{...C.card,borderColor:"rgba(230,57,70,.3)"}}>
-          <div style={C.ctitle}>🔔 Yaklaşan Yatırım Vadeleri</div>
-          {upcoming.map(pos=>{
-            const d=daysDiff(pos.maturityDate);
-            return (
-              <div key={pos.id} style={C.drow}>
-                <div>
-                  <span style={{fontWeight:600}}>{pos.label}</span>
-                  {d===0&&<span style={C.utag}>BUGÜN</span>}
-                </div>
-                <span style={{color:"#ff8a80",fontWeight:700}}>{d===0?"Bugün":d+" gün"}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {todayInc.length>0&&(
-        <div style={C.card}>
-          <div style={C.ctitle}>💰 Bugün Gelmesi Beklenen Gelirler</div>
-          {todayInc.map(item=>{
-            const mk=mkey(CY,CM);
-            const col=!!((state.monthlyData[mk]||{}).incomeCollected||{})[item.id];
-            return (
-              <div key={item.id} style={C.drow}>
-                <div>
-                  <div style={{fontWeight:600}}>{item.label}</div>
-                  <div style={{fontSize:11,color:"#e9c46a"}}>{fmt(item.amount)}</div>
-                </div>
-                <button style={{...C.pbtn,background:col?"#2a9d8f":"#e9c46a",color:"#0f0f13"}}
-                  onClick={()=>toggleInc(mk,item.id)}>
-                  {col?"✓ Geldi":"Geldi mi?"}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {due.length>0&&(
-        <div style={C.card}>
-          <div style={C.ctitle}>🔔 Bugün Yapılacak Ödemeler</div>
-          {due.map(item=>(
-            <div key={item.id} style={C.drow}>
-              <div>
-                <div style={{fontWeight:600}}>{item.label}</div>
-                {!item.isCard&&<div style={{fontSize:11,color:"#e9c46a"}}>{fmt(item.amount)}</div>}
-              </div>
-              {!item.isCut&&(
-                <button style={{...C.pbtn,background:"#e63946"}}
-                  onClick={()=>togglePay(item.mk,item.id)}>✓ Ödedim</button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div style={C.card}>
-        <div style={C.ctitle}>Yıl Boyu Birikim</div>
-        <MiniBar data={forecast}/>
-      </div>
-
-      <div style={C.r2}>
-        <div style={C.card}>
-          <div style={C.ctitle}>Gelir Kalemleri</div>
-          {state.incomeItems.filter(i=>i.active).map(i=>(
-            <div key={i.id} style={C.irow}>
-              <span style={{color:"#ccc"}}>{i.label}{i.incomeDay===CD&&<span style={C.tag}>BUGÜN</span>}</span>
-              <span style={{fontWeight:700,color:"#2a9d8f"}}>{fmt(i.amount)}</span>
-            </div>
-          ))}
-        </div>
-        <div style={C.card}>
-          <div style={C.ctitle}>Gider Kalemleri</div>
-          {state.expenseItems.filter(i=>i.active).map(i=>(
-            <div key={i.id} style={C.irow}>
-              <span style={{color:"#ccc"}}>{i.label}{i.dueDay===CD&&<span style={C.tag}>BUGÜN</span>}</span>
-              <span style={{fontWeight:700,color:"#e63946"}}>{fmt(i.amount)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+  return e("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+    e("div",{style:{fontSize:17,fontWeight:800}},"Bu Ay · "+FULL_MONTHS[CM]+" "+CY),
+    e("div",{style:S.kgrid},
+      e(KCard,{label:"Aylık Gelir",value:fmt(tm.inc),color:"#2a9d8f",icon:"↑"}),
+      e(KCard,{label:"Aylık Gider",value:fmt(tm.exp),color:"#e63946",icon:"↓"}),
+      e(KCard,{label:"Net Tasarruf",value:fmt(tm.net),color:tm.net>=0?"#2a9d8f":"#e63946",icon:"="}),
+      e(KCard,{label:"Toplam Varlık",value:fmt(nw),color:"#e9c46a",icon:"◈"}),
+      e(KCard,{label:"Portföy",value:fmt(pv),color:"#f4a261",icon:"📊"})
+    ),
+    upcoming.length>0&&e("div",{style:{...S.card,borderColor:"rgba(230,57,70,.3)"}},
+      e("div",{style:S.ctitle},"🔔 Yaklaşan Vadeler"),
+      upcoming.map(pos=>{const d=dDiff(pos.maturityDate);return e("div",{key:pos.id,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid rgba(255,255,255,.06)"}},
+        e("div",{style:{fontWeight:600}},pos.label,d===0&&e("span",{style:S.utag},"BUGÜN")),
+        e("span",{style:{color:"#ff8a80",fontWeight:700}},d===0?"Bugün":d+" gün")
+      )})
+    ),
+    todayInc.length>0&&e("div",{style:S.card},
+      e("div",{style:S.ctitle},"💰 Bugün Gelmesi Beklenen Gelirler"),
+      todayInc.map(item=>{
+        const mk2=mkey(CY,CM);
+        const col=!!(((state.monthlyData[mk2]||{}).incomeCollected)||{})[item.id];
+        return e("div",{key:item.id,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.06)"}},
+          e("div",null,e("div",{style:{fontWeight:600}},item.label),e("div",{style:{fontSize:11,color:"#e9c46a"}},fmt(item.amount))),
+          e("button",{style:S.pbtn(col?"#2a9d8f":"#e9c46a",col?"#fff":"#0f0f13"),onClick:()=>toggleInc(mk2,item.id)},col?"✓ Geldi":"Geldi mi?")
+        );
+      })
+    ),
+    due.length>0&&e("div",{style:S.card},
+      e("div",{style:S.ctitle},"🔔 Bugün Yapılacak Ödemeler"),
+      due.map(item=>e("div",{key:item.id,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.06)"}},
+        e("div",null,e("div",{style:{fontWeight:600}},item.label),!item.isCard&&e("div",{style:{fontSize:11,color:"#e9c46a"}},fmt(item.amount))),
+        !item.isCut&&e("button",{style:S.pbtn("#e63946"),onClick:()=>togglePay(item.mk,item.id)},"✓ Ödedim")
+      ))
+    ),
+    e("div",{style:S.card},e("div",{style:S.ctitle},"Yıl Boyu Birikim"),e(MiniBar,{data:forecast})),
+    e("div",{style:S.r2},
+      e("div",{style:S.card},
+        e("div",{style:S.ctitle},"Gelir Kalemleri"),
+        state.incomeItems.filter(i=>i.active).map(i=>e("div",{key:i.id,style:S.irow},
+          e("span",{style:{color:"#ccc"}},i.label,i.incomeDay===CD&&e("span",{style:S.tag},"BUGÜN")),
+          e("span",{style:{fontWeight:700,color:"#2a9d8f"}},fmt(i.amount))
+        ))
+      ),
+      e("div",{style:S.card},
+        e("div",{style:S.ctitle},"Gider Kalemleri"),
+        state.expenseItems.filter(i=>i.active).map(i=>e("div",{key:i.id,style:S.irow},
+          e("span",{style:{color:"#ccc"}},i.label,i.dueDay===CD&&e("span",{style:S.tag},"BUGÜN")),
+          e("span",{style:{fontWeight:700,color:"#e63946"}},fmt(i.amount))
+        ))
+      )
+    )
   );
 }
 
-// ══ GELIRLER ═══════════════════════════════════
+// ── INCOME TAB
 function IncomeTab({state,upd,toast}){
   const [form,setForm]=useState({label:"",type:"salary",amount:"",incomeDay:""});
   const total=state.incomeItems.filter(i=>i.active).reduce((s,i)=>s+i.amount,0);
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{fontSize:18,fontWeight:800}}>Gelir Kalemleri</div>
-      <div style={tbanner("#2a9d8f")}>Toplam: {fmt(total)}</div>
-
-      <div style={C.card}>
-        {state.incomeItems.map(it=>(
-          <div key={it.id} style={{...C.lrow,opacity:it.active?1:0.45}}>
-            <div style={{display:"flex",alignItems:"center",gap:9}}>
-              <button style={togBtn(it.active)}
-                onClick={()=>upd(s=>{s.incomeItems=s.incomeItems.map(i=>i.id===it.id?{...i,active:!i.active}:i);})}>
-                {it.active?"●":"○"}
-              </button>
-              <div>
-                <div style={{fontWeight:600,fontSize:13}}>
-                  {it.label}{it.incomeDay===CD&&<span style={C.tag}>BUGÜN</span>}
-                </div>
-                <div style={{fontSize:10,color:"#888"}}>
-                  {INC_TYPES[it.type]}{it.incomeDay?" · Her ayın "+it.incomeDay+". günü":""}
-                </div>
-              </div>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:6}}>
-              <input style={C.dinp} type="number" min="1" max="31" placeholder="Gün"
-                value={it.incomeDay||""}
-                onChange={e=>upd(s=>{s.incomeItems=s.incomeItems.map(i=>i.id===it.id?{...i,incomeDay:+e.target.value}:i);})}/>
-              <input style={C.ainp} type="number" value={it.amount}
-                onChange={e=>upd(s=>{s.incomeItems=s.incomeItems.map(i=>i.id===it.id?{...i,amount:+e.target.value}:i);})}/>
-              <span style={{fontSize:11,color:"#888"}}>₺</span>
-              <button style={C.delbtn}
-                onClick={()=>upd(s=>{s.incomeItems=s.incomeItems.filter(i=>i.id!==it.id);})}>✕</button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div style={C.card}>
-        <div style={C.ctitle}>Yeni Gelir</div>
-        <div style={C.frow}>
-          <input style={C.inp} placeholder="Kalem adı" value={form.label}
-            onChange={e=>setForm(f=>({...f,label:e.target.value}))}/>
-          <select style={C.sel} value={form.type}
-            onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
-            {Object.entries(INC_TYPES).map(([k,v])=><option key={k} value={k}>{v}</option>)}
-          </select>
-        </div>
-        <div style={C.frow}>
-          <input style={C.inp} type="number" placeholder="Tutar ₺" value={form.amount}
-            onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/>
-          <input style={C.inp} type="number" placeholder="Ayın kaçında? (ör: 5)" min="1" max="31"
-            value={form.incomeDay}
-            onChange={e=>setForm(f=>({...f,incomeDay:e.target.value}))}/>
-          <button style={C.addbtn} onClick={()=>{
-            if(!form.label||!form.amount) return;
-            upd(s=>{s.incomeItems=[...s.incomeItems,{id:uid(),...form,amount:+form.amount,incomeDay:+form.incomeDay||0,active:true}];});
-            setForm({label:"",type:"salary",amount:"",incomeDay:""});
-            toast("Gelir kalemi eklendi");
-          }}>+ Ekle</button>
-        </div>
-      </div>
-
-      <div style={C.card}>
-        <div style={C.ctitle}>📅 Bu Ay Gelir Takvimi</div>
-        {state.incomeItems.filter(i=>i.active&&i.incomeDay>0).length===0&&<div style={C.empty}>Gelir günü girilmemiş.</div>}
-        {state.incomeItems.filter(i=>i.active&&i.incomeDay>0).sort((a,b)=>a.incomeDay-b.incomeDay).map(it=>{
-          const isToday=it.incomeDay===CD;
-          const isPast=it.incomeDay<CD;
-          return (
-            <div key={it.id} style={{...C.prow,background:isToday?"rgba(233,196,106,.1)":"rgba(255,255,255,.02)"}}>
-              <div>
-                <div style={{fontWeight:600}}>{it.label}{isToday&&<span style={C.tag}>BUGÜN</span>}</div>
-                <div style={{fontSize:10,color:"#888"}}>Her ayın {it.incomeDay}. günü</div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontWeight:700,color:"#2a9d8f"}}>{fmt(it.amount)}</div>
-                <div style={{fontSize:10,color:"#888"}}>
-                  {isToday?"Bugün":isPast?(CD-it.incomeDay)+"g önce":(it.incomeDay-CD)+"g sonra"}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+  return e("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+    e("div",{style:{fontSize:17,fontWeight:800}},"Gelir Kalemleri"),
+    e("div",{style:{padding:"10px 14px",borderRadius:11,background:"rgba(42,157,143,.15)",border:"1px solid rgba(42,157,143,.3)",color:"#2a9d8f",fontWeight:700}},"Toplam: "+fmt(total)),
+    e("div",{style:S.card},
+      state.incomeItems.map(it=>e("div",{key:it.id,style:{...S.lrow,opacity:it.active?1:0.45}},
+        e("div",{style:{display:"flex",alignItems:"center",gap:8}},
+          e("button",{style:{width:18,height:18,border:"none",background:"none",color:it.active?"#2a9d8f":"#555",cursor:"pointer",fontSize:14,padding:0},onClick:()=>upd(s=>{s.incomeItems=s.incomeItems.map(i=>i.id===it.id?{...i,active:!i.active}:i)})},it.active?"●":"○"),
+          e("div",null,
+            e("div",{style:{fontWeight:600,fontSize:13}},it.label,it.incomeDay===CD&&e("span",{style:S.tag},"BUGÜN")),
+            e("div",{style:{fontSize:10,color:"#888"}},(INC_TYPES[it.type]||"")+(it.incomeDay?" · Ayın "+it.incomeDay+". günü":""))
+          )
+        ),
+        e("div",{style:{display:"flex",alignItems:"center",gap:5}},
+          e("input",{style:S.dinp,type:"number",min:1,max:31,placeholder:"Gün",value:it.incomeDay||"",onChange:ev=>upd(s=>{s.incomeItems=s.incomeItems.map(i=>i.id===it.id?{...i,incomeDay:+ev.target.value}:i)})}),
+          e("input",{style:S.ainp,type:"number",value:it.amount,onChange:ev=>upd(s=>{s.incomeItems=s.incomeItems.map(i=>i.id===it.id?{...i,amount:+ev.target.value}:i)})}),
+          e("span",{style:{fontSize:11,color:"#888"}},"₺"),
+          e("button",{style:S.delbtn,onClick:()=>upd(s=>{s.incomeItems=s.incomeItems.filter(i=>i.id!==it.id)})},"✕")
+        )
+      ))
+    ),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"Yeni Gelir"),
+      e("div",{style:S.frow},
+        e("input",{style:S.inp,placeholder:"Kalem adı",value:form.label,onChange:ev=>setForm(f=>({...f,label:ev.target.value}))}),
+        e("select",{style:S.sel,value:form.type,onChange:ev=>setForm(f=>({...f,type:ev.target.value}))},
+          Object.entries(INC_TYPES).map(([k,v])=>e("option",{key:k,value:k},v))
+        )
+      ),
+      e("div",{style:S.frow},
+        e("input",{style:S.inp,type:"number",placeholder:"Tutar ₺",value:form.amount,onChange:ev=>setForm(f=>({...f,amount:ev.target.value}))}),
+        e("input",{style:S.inp,type:"number",placeholder:"Ayın kaçında? (ör: 5)",min:1,max:31,value:form.incomeDay,onChange:ev=>setForm(f=>({...f,incomeDay:ev.target.value}))}),
+        e("button",{style:S.addbtn,onClick:()=>{
+          if(!form.label||!form.amount)return;
+          upd(s=>{s.incomeItems=[...s.incomeItems,{id:uid(),...form,amount:+form.amount,incomeDay:+form.incomeDay||0,active:true}]});
+          setForm({label:"",type:"salary",amount:"",incomeDay:""});
+          toast("Gelir kalemi eklendi");
+        }},"+ Ekle")
+      )
+    ),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"📅 Bu Ay Gelir Takvimi"),
+      state.incomeItems.filter(i=>i.active&&i.incomeDay>0).length===0&&e("div",{style:{color:"#666",fontSize:12,padding:"8px 0"}},"Gelir günü girilmemiş."),
+      state.incomeItems.filter(i=>i.active&&i.incomeDay>0).sort((a,b)=>a.incomeDay-b.incomeDay).map(it=>{
+        const isT=it.incomeDay===CD, isP=it.incomeDay<CD;
+        return e("div",{key:it.id,style:S.prow(isT?"rgba(233,196,106,.1)":"rgba(255,255,255,.02)")},
+          e("div",null,e("div",{style:{fontWeight:600}},it.label,isT&&e("span",{style:S.tag},"BUGÜN")),e("div",{style:{fontSize:10,color:"#888"}},"Ayın "+it.incomeDay+". günü")),
+          e("div",{style:{textAlign:"right"}},e("div",{style:{fontWeight:700,color:"#2a9d8f"}},fmt(it.amount)),e("div",{style:{fontSize:10,color:"#888"}},isT?"Bugün":isP?(CD-it.incomeDay)+"g önce":(it.incomeDay-CD)+"g sonra"))
+        );
+      })
+    )
   );
 }
 
-// ══ GIDERLER ═══════════════════════════════════
+// ── EXPENSES TAB
 function ExpensesTab({state,upd,toast}){
   const [form,setForm]=useState({label:"",type:"fixed",amount:"",dueDay:"",remaining:""});
   const total=state.expenseItems.filter(i=>i.active).reduce((s,i)=>s+i.amount,0);
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{fontSize:18,fontWeight:800}}>Gider Kalemleri</div>
-      <div style={tbanner("#e63946")}>Toplam: {fmt(total)}</div>
-
-      <div style={C.card}>
-        {state.expenseItems.map(it=>(
-          <div key={it.id} style={{...C.lrow,opacity:it.active?1:0.45}}>
-            <div style={{display:"flex",alignItems:"center",gap:9}}>
-              <button style={togBtn(it.active)}
-                onClick={()=>upd(s=>{s.expenseItems=s.expenseItems.map(i=>i.id===it.id?{...i,active:!i.active}:i);})}>
-                {it.active?"●":"○"}
-              </button>
-              <div>
-                <div style={{fontWeight:600,fontSize:13}}>
-                  {it.label}{it.dueDay===CD&&<span style={C.tag}>BUGÜN</span>}
-                </div>
-                <div style={{fontSize:10,color:"#888"}}>
-                  {EXP_TYPES[it.type]}
-                  {it.dueDay?" · Vade: "+it.dueDay+". gün":""}
-                  {it.remaining?" · "+it.remaining+" taksit":""}
-                </div>
-              </div>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:6}}>
-              <input style={C.dinp} type="number" min="1" max="31" placeholder="Gün"
-                value={it.dueDay||""}
-                onChange={e=>upd(s=>{s.expenseItems=s.expenseItems.map(i=>i.id===it.id?{...i,dueDay:+e.target.value}:i);})}/>
-              <input style={C.ainp} type="number" value={it.amount}
-                onChange={e=>upd(s=>{s.expenseItems=s.expenseItems.map(i=>i.id===it.id?{...i,amount:+e.target.value}:i);})}/>
-              <span style={{fontSize:11,color:"#888"}}>₺</span>
-              <button style={C.delbtn}
-                onClick={()=>upd(s=>{s.expenseItems=s.expenseItems.filter(i=>i.id!==it.id);})}>✕</button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div style={C.card}>
-        <div style={C.ctitle}>Yeni Gider</div>
-        <div style={C.frow}>
-          <input style={C.inp} placeholder="Kalem adı" value={form.label}
-            onChange={e=>setForm(f=>({...f,label:e.target.value}))}/>
-          <select style={C.sel} value={form.type}
-            onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
-            {Object.entries(EXP_TYPES).map(([k,v])=><option key={k} value={k}>{v}</option>)}
-          </select>
-        </div>
-        <div style={C.frow}>
-          <input style={C.inp} type="number" placeholder="Aylık tutar ₺" value={form.amount}
-            onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/>
-          <input style={C.inp} type="number" placeholder="Vade günü (ör: 15)" value={form.dueDay}
-            onChange={e=>setForm(f=>({...f,dueDay:e.target.value}))}/>
-          <input style={C.inp} type="number" placeholder="Kalan taksit" value={form.remaining}
-            onChange={e=>setForm(f=>({...f,remaining:e.target.value}))}/>
-          <button style={C.addbtn} onClick={()=>{
-            if(!form.label||!form.amount) return;
-            upd(s=>{s.expenseItems=[...s.expenseItems,{id:uid(),...form,amount:+form.amount,dueDay:+form.dueDay||0,remaining:+form.remaining||0,active:true}];});
-            setForm({label:"",type:"fixed",amount:"",dueDay:"",remaining:""});
-            toast("Gider kalemi eklendi");
-          }}>+ Ekle</button>
-        </div>
-      </div>
-
-      <div style={C.card}>
-        <div style={C.ctitle}>📅 Bu Ay Gider Takvimi</div>
-        {state.expenseItems.filter(i=>i.active&&i.dueDay>0).length===0&&<div style={C.empty}>Vade günü girilmemiş.</div>}
-        {state.expenseItems.filter(i=>i.active&&i.dueDay>0).sort((a,b)=>a.dueDay-b.dueDay).map(it=>{
-          const isToday=it.dueDay===CD;
-          const isPast=it.dueDay<CD;
-          return (
-            <div key={it.id} style={{...C.prow,background:isToday?"rgba(230,57,70,.12)":"rgba(255,255,255,.02)"}}>
-              <div>
-                <div style={{fontWeight:600}}>{it.label}{isToday&&<span style={C.tag}>BUGÜN</span>}</div>
-                <div style={{fontSize:10,color:"#888"}}>Her ayın {it.dueDay}. günü</div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontWeight:700,color:"#e63946"}}>{fmt(it.amount)}</div>
-                <div style={{fontSize:10,color:"#888"}}>
-                  {isToday?"Bugün":isPast?(CD-it.dueDay)+"g önce":(it.dueDay-CD)+"g sonra"}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+  return e("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+    e("div",{style:{fontSize:17,fontWeight:800}},"Gider Kalemleri"),
+    e("div",{style:{padding:"10px 14px",borderRadius:11,background:"rgba(230,57,70,.15)",border:"1px solid rgba(230,57,70,.3)",color:"#e63946",fontWeight:700}},"Toplam: "+fmt(total)),
+    e("div",{style:S.card},
+      state.expenseItems.map(it=>e("div",{key:it.id,style:{...S.lrow,opacity:it.active?1:0.45}},
+        e("div",{style:{display:"flex",alignItems:"center",gap:8}},
+          e("button",{style:{width:18,height:18,border:"none",background:"none",color:it.active?"#2a9d8f":"#555",cursor:"pointer",fontSize:14,padding:0},onClick:()=>upd(s=>{s.expenseItems=s.expenseItems.map(i=>i.id===it.id?{...i,active:!i.active}:i)})},it.active?"●":"○"),
+          e("div",null,
+            e("div",{style:{fontWeight:600,fontSize:13}},it.label,it.dueDay===CD&&e("span",{style:S.tag},"BUGÜN")),
+            e("div",{style:{fontSize:10,color:"#888"}},(EXP_TYPES[it.type]||"")+(it.dueDay?" · Vade: "+it.dueDay+". gün":"")+(it.remaining?" · "+it.remaining+" taksit":""))
+          )
+        ),
+        e("div",{style:{display:"flex",alignItems:"center",gap:5}},
+          e("input",{style:S.dinp,type:"number",min:1,max:31,placeholder:"Gün",value:it.dueDay||"",onChange:ev=>upd(s=>{s.expenseItems=s.expenseItems.map(i=>i.id===it.id?{...i,dueDay:+ev.target.value}:i)})}),
+          e("input",{style:S.ainp,type:"number",value:it.amount,onChange:ev=>upd(s=>{s.expenseItems=s.expenseItems.map(i=>i.id===it.id?{...i,amount:+ev.target.value}:i)})}),
+          e("span",{style:{fontSize:11,color:"#888"}},"₺"),
+          e("button",{style:S.delbtn,onClick:()=>upd(s=>{s.expenseItems=s.expenseItems.filter(i=>i.id!==it.id)})},"✕")
+        )
+      ))
+    ),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"Yeni Gider"),
+      e("div",{style:S.frow},
+        e("input",{style:S.inp,placeholder:"Kalem adı",value:form.label,onChange:ev=>setForm(f=>({...f,label:ev.target.value}))}),
+        e("select",{style:S.sel,value:form.type,onChange:ev=>setForm(f=>({...f,type:ev.target.value}))},
+          Object.entries(EXP_TYPES).map(([k,v])=>e("option",{key:k,value:k},v))
+        )
+      ),
+      e("div",{style:S.frow},
+        e("input",{style:S.inp,type:"number",placeholder:"Aylık tutar ₺",value:form.amount,onChange:ev=>setForm(f=>({...f,amount:ev.target.value}))}),
+        e("input",{style:S.inp,type:"number",placeholder:"Vade günü (ör: 15)",value:form.dueDay,onChange:ev=>setForm(f=>({...f,dueDay:ev.target.value}))}),
+        e("input",{style:S.inp,type:"number",placeholder:"Kalan taksit",value:form.remaining,onChange:ev=>setForm(f=>({...f,remaining:ev.target.value}))}),
+        e("button",{style:S.addbtn,onClick:()=>{
+          if(!form.label||!form.amount)return;
+          upd(s=>{s.expenseItems=[...s.expenseItems,{id:uid(),...form,amount:+form.amount,dueDay:+form.dueDay||0,remaining:+form.remaining||0,active:true}]});
+          setForm({label:"",type:"fixed",amount:"",dueDay:"",remaining:""});
+          toast("Gider kalemi eklendi");
+        }},"+ Ekle")
+      )
+    ),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"📅 Bu Ay Gider Takvimi"),
+      state.expenseItems.filter(i=>i.active&&i.dueDay>0).length===0&&e("div",{style:{color:"#666",fontSize:12,padding:"8px 0"}},"Vade günü girilmemiş."),
+      state.expenseItems.filter(i=>i.active&&i.dueDay>0).sort((a,b)=>a.dueDay-b.dueDay).map(it=>{
+        const isT=it.dueDay===CD, isP=it.dueDay<CD;
+        return e("div",{key:it.id,style:S.prow(isT?"rgba(230,57,70,.12)":"rgba(255,255,255,.02)")},
+          e("div",null,e("div",{style:{fontWeight:600}},it.label,isT&&e("span",{style:S.tag},"BUGÜN")),e("div",{style:{fontSize:10,color:"#888"}},"Ayın "+it.dueDay+". günü")),
+          e("div",{style:{textAlign:"right"}},e("div",{style:{fontWeight:700,color:"#e63946"}},fmt(it.amount)),e("div",{style:{fontSize:10,color:"#888"}},isT?"Bugün":isP?(CD-it.dueDay)+"g önce":(it.dueDay-CD)+"g sonra"))
+        );
+      })
+    )
   );
 }
 
-// ══ ÖDEMELER ═══════════════════════════════════
+// ── PAYMENTS TAB
 function PaymentsTab({state,togglePay,toggleInc}){
   const [selM,setSelM]=useState(CM);
   const mk=mkey(CY,selM);
@@ -683,725 +351,482 @@ function PaymentsTab({state,togglePay,toggleInc}){
   const totalInc=incItems.reduce((s,i)=>s+i.amount,0);
   const coll=incItems.filter(i=>ic[i.id]).reduce((s,i)=>s+i.amount,0);
 
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{fontSize:18,fontWeight:800}}>Ödeme ve Gelir Takibi</div>
-      <div style={C.msel}>
-        {MONTHS.map((m,i)=>(
-          <button key={i} style={{...C.mbtn,...(selM===i?C.mbtnA:{})}} onClick={()=>setSelM(i)}>{m}</button>
-        ))}
-      </div>
-      <div style={C.kgrid}>
-        <KCard label="Toplam Gider"   value={fmt(totalDue)}      color="#e63946" icon="↓"/>
-        <KCard label="Ödenen"         value={fmt(paid)}           color="#2a9d8f" icon="✓"/>
-        <KCard label="Bekleyen"       value={fmt(totalDue-paid)}  color="#e9c46a" icon="!"/>
-        <KCard label="Beklenen Gelir" value={fmt(totalInc)}       color="#2a9d8f" icon="↑"/>
-        <KCard label="Gelen"          value={fmt(coll)}           color="#2a9d8f" icon="✓"/>
-        <KCard label="Bekleniyor"     value={fmt(totalInc-coll)}  color="#888"    icon="…"/>
-      </div>
-
-      <div style={C.card}>
-        <div style={C.ctitle}>💰 Gelirler · {FULL_MONTHS[selM]}</div>
-        {incItems.length===0&&<div style={C.empty}>Gelir günü girilmemiş.</div>}
-        {incItems.sort((a,b)=>a.incomeDay-b.incomeDay).map(it=>{
-          const collected=!!ic[it.id];
-          const isToday=it.incomeDay===CD&&selM===CM;
-          return (
-            <div key={it.id} style={{...C.prow,background:collected?"rgba(42,157,143,.12)":isToday?"rgba(233,196,106,.08)":"rgba(255,255,255,.02)"}}>
-              <div>
-                <div style={{fontWeight:600}}>{it.label}{isToday&&<span style={C.tag}>BUGÜN</span>}</div>
-                <div style={{fontSize:10,color:"#888"}}>Her ayın {it.incomeDay}. günü · {fmt(it.amount)}</div>
-              </div>
-              <button style={{...C.pbtn,background:collected?"#2a9d8f":"#e9c46a",color:"#0f0f13"}}
-                onClick={()=>toggleInc(mk,it.id)}>
-                {collected?"✓ Geldi":"Geldi mi?"}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      <div style={C.card}>
-        <div style={C.ctitle}>💸 Ödemeler · {FULL_MONTHS[selM]}</div>
-        {dueItems.length===0&&<div style={C.empty}>Vadeli gider yok.</div>}
-        {dueItems.sort((a,b)=>a.dueDay-b.dueDay).map(it=>{
-          const p2=!!pays[it.id];
-          const isToday=it.dueDay===CD&&selM===CM;
-          return (
-            <div key={it.id} style={{...C.prow,background:p2?"rgba(42,157,143,.12)":isToday?"rgba(230,57,70,.14)":"rgba(230,57,70,.04)"}}>
-              <div>
-                <div style={{fontWeight:600}}>{it.label}{isToday&&<span style={C.tag}>BUGÜN</span>}</div>
-                <div style={{fontSize:10,color:"#888"}}>Her ayın {it.dueDay}. günü · {fmt(it.amount)}</div>
-              </div>
-              <button style={{...C.pbtn,background:p2?"#2a9d8f":"#e63946"}}
-                onClick={()=>togglePay(mk,it.id)}>
-                {p2?"✓ Ödendi":"Öde"}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      <div style={C.card}>
-        <div style={C.ctitle}>💳 Kart Tarihleri · {FULL_MONTHS[selM]}</div>
-        {state.creditCards.length===0&&<div style={C.empty}>Kart eklenmemiş.</div>}
-        {state.creditCards.map(c=>{
-          const ct=c.cutDay===CD&&selM===CM;
-          const dt=c.dueDay===CD&&selM===CM;
-          return (
-            <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.06)"}}>
-              <div style={{width:10,height:10,borderRadius:"50%",background:c.color,flexShrink:0}}/>
-              <div style={{flex:1}}>
-                <div style={{fontWeight:600}}>{c.label}</div>
-                <div style={{fontSize:10,color:"#888"}}>
-                  <span style={ct?{color:"#e9c46a",fontWeight:700}:{}}>✂️ Kesim: {c.cutDay}.{ct?" (BUGÜN)":""}</span>
-                  {"  ·  "}
-                  <span style={dt?{color:"#e63946",fontWeight:700}:{}}>💳 Son Ödeme: {c.dueDay}.{dt?" (BUGÜN)":""}</span>
-                </div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:10,color:"#aaa"}}>Limit</div>
-                <div style={{fontWeight:700}}>{fmt(c.limit)}</div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+  return e("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+    e("div",{style:{fontSize:17,fontWeight:800}},"Ödeme ve Gelir Takibi"),
+    e("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
+      MONTHS.map((m,i)=>e("button",{key:i,style:{padding:"5px 9px",borderRadius:7,border:"1px solid "+(selM===i?"rgba(233,196,106,.4)":"rgba(255,255,255,.1)"),background:selM===i?"rgba(233,196,106,.2)":"transparent",color:selM===i?"#e9c46a":"#888",cursor:"pointer",fontSize:11,fontWeight:selM===i?700:400},onClick:()=>setSelM(i)},m))
+    ),
+    e("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(145px,1fr))",gap:9,marginBottom:4}},
+      e(KCard,{label:"Toplam Gider",value:fmt(totalDue),color:"#e63946",icon:"↓"}),
+      e(KCard,{label:"Ödenen",value:fmt(paid),color:"#2a9d8f",icon:"✓"}),
+      e(KCard,{label:"Bekleyen",value:fmt(totalDue-paid),color:"#e9c46a",icon:"!"}),
+      e(KCard,{label:"Beklenen Gelir",value:fmt(totalInc),color:"#2a9d8f",icon:"↑"}),
+      e(KCard,{label:"Gelen Gelir",value:fmt(coll),color:"#2a9d8f",icon:"✓"}),
+      e(KCard,{label:"Bekleniyor",value:fmt(totalInc-coll),color:"#888",icon:"…"})
+    ),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"💰 Gelirler · "+FULL_MONTHS[selM]),
+      incItems.length===0&&e("div",{style:{color:"#666",fontSize:12}},"Gelir günü girilmemiş."),
+      incItems.sort((a,b)=>a.incomeDay-b.incomeDay).map(it=>{
+        const col=!!ic[it.id], isT=it.incomeDay===CD&&selM===CM;
+        return e("div",{key:it.id,style:S.prow(col?"rgba(42,157,143,.12)":isT?"rgba(233,196,106,.08)":"rgba(255,255,255,.02)")},
+          e("div",null,e("div",{style:{fontWeight:600}},it.label,isT&&e("span",{style:S.tag},"BUGÜN")),e("div",{style:{fontSize:10,color:"#888"}},"Ayın "+it.incomeDay+". günü · "+fmt(it.amount))),
+          e("button",{style:S.pbtn(col?"#2a9d8f":"#e9c46a",col?"#fff":"#0f0f13"),onClick:()=>toggleInc(mk,it.id)},col?"✓ Geldi":"Geldi mi?")
+        );
+      })
+    ),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"💸 Ödemeler · "+FULL_MONTHS[selM]),
+      dueItems.length===0&&e("div",{style:{color:"#666",fontSize:12}},"Vadeli gider yok."),
+      dueItems.sort((a,b)=>a.dueDay-b.dueDay).map(it=>{
+        const p2=!!pays[it.id], isT=it.dueDay===CD&&selM===CM;
+        return e("div",{key:it.id,style:S.prow(p2?"rgba(42,157,143,.12)":isT?"rgba(230,57,70,.14)":"rgba(230,57,70,.04)")},
+          e("div",null,e("div",{style:{fontWeight:600}},it.label,isT&&e("span",{style:S.tag},"BUGÜN")),e("div",{style:{fontSize:10,color:"#888"}},"Ayın "+it.dueDay+"'i · "+fmt(it.amount))),
+          e("button",{style:S.pbtn(p2?"#2a9d8f":"#e63946"),onClick:()=>togglePay(mk,it.id)},p2?"✓ Ödendi":"Öde")
+        );
+      })
+    ),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"💳 Kart Tarihleri · "+FULL_MONTHS[selM]),
+      state.creditCards.length===0&&e("div",{style:{color:"#666",fontSize:12}},"Kart eklenmemiş."),
+      state.creditCards.map(c=>{
+        const ct=c.cutDay===CD&&selM===CM, dt=c.dueDay===CD&&selM===CM;
+        return e("div",{key:c.id,style:{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,.06)"}},
+          e("div",{style:{width:9,height:9,borderRadius:"50%",background:c.color,flexShrink:0}}),
+          e("div",{style:{flex:1}},
+            e("div",{style:{fontWeight:600}},c.label),
+            e("div",{style:{fontSize:10,color:"#888"}},
+              e("span",{style:ct?{color:"#e9c46a",fontWeight:700}:{}},"✂️ Kesim: "+c.cutDay+"."+(ct?" (BUGÜN)":"")),
+              "  ·  ",
+              e("span",{style:dt?{color:"#e63946",fontWeight:700}:{}},"💳 Ödeme: "+c.dueDay+"."+(dt?" (BUGÜN)":""))
+            )
+          ),
+          e("div",{style:{textAlign:"right"}},e("div",{style:{fontSize:10,color:"#aaa"}},"Limit"),e("div",{style:{fontWeight:700}},fmt(c.limit)))
+        );
+      })
+    )
   );
 }
 
-// ══ KARTLAR ════════════════════════════════════
+// ── CARDS TAB
 function CardsTab({state,upd,toast}){
   const [form,setForm]=useState({label:"",limit:"",cutDay:"",dueDay:"",color:"#e63946"});
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{fontSize:18,fontWeight:800}}>Kredi Kartları</div>
-      <div style={C.cgrid}>
-        {state.creditCards.map(c=>{
-          const dl=daysLeft(c.dueDay);
-          const cl=daysLeft(c.cutDay);
-          return (
-            <div key={c.id} style={{...C.cc,background:"linear-gradient(135deg,"+c.color+"dd,"+c.color+"88)"}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:9}}>
-                <div style={{fontSize:16,fontWeight:800}}>{c.label}</div>
-                <button style={{background:"rgba(0,0,0,.3)",border:"none",color:"#fff",width:23,height:23,borderRadius:5,cursor:"pointer",fontSize:10}}
-                  onClick={()=>upd(s=>{s.creditCards=s.creditCards.filter(x=>x.id!==c.id);})}>✕</button>
-              </div>
-              <div style={{fontSize:12,opacity:0.9,marginBottom:12}}>Limit: {fmt(c.limit)}</div>
-              <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:24,fontWeight:900}}>{c.cutDay}</div>
-                  <div style={{fontSize:10,opacity:0.8}}>Hesap Kesim</div>
-                  <div style={{fontSize:10,color:cl<=3?"#e9c46a":"rgba(255,255,255,.7)",fontWeight:cl<=3?700:400}}>
-                    {cl===31?"Bugün!":cl+"g kaldı"}
-                  </div>
-                </div>
-                <div style={{opacity:0.4}}>·</div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:24,fontWeight:900}}>{c.dueDay}</div>
-                  <div style={{fontSize:10,opacity:0.8}}>Son Ödeme</div>
-                  <div style={{fontSize:10,color:dl<=3?"#ff8a80":"rgba(255,255,255,.7)",fontWeight:dl<=3?700:400}}>
-                    {dl===31?"Bugün!":dl+"g kaldı"}
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div style={C.card}>
-        <div style={C.ctitle}>Yeni Kart</div>
-        <div style={C.frow}>
-          <input style={C.inp} placeholder="Kart adı" value={form.label} onChange={e=>setForm(f=>({...f,label:e.target.value}))}/>
-          <input style={C.inp} type="number" placeholder="Limit ₺" value={form.limit} onChange={e=>setForm(f=>({...f,limit:e.target.value}))}/>
-        </div>
-        <div style={C.frow}>
-          <input style={C.inp} type="number" placeholder="Hesap kesim günü" value={form.cutDay} onChange={e=>setForm(f=>({...f,cutDay:e.target.value}))}/>
-          <input style={C.inp} type="number" placeholder="Son ödeme günü" value={form.dueDay} onChange={e=>setForm(f=>({...f,dueDay:e.target.value}))}/>
-          <input type="color" value={form.color} onChange={e=>setForm(f=>({...f,color:e.target.value}))} style={{width:40,height:40,border:"none",borderRadius:7,cursor:"pointer"}}/>
-          <button style={C.addbtn} onClick={()=>{
-            if(!form.label) return;
-            upd(s=>{s.creditCards=[...s.creditCards,{id:uid(),...form,limit:+form.limit,cutDay:+form.cutDay,dueDay:+form.dueDay}];});
-            setForm({label:"",limit:"",cutDay:"",dueDay:"",color:"#e63946"});
-            toast("Kart eklendi");
-          }}>+ Ekle</button>
-        </div>
-      </div>
-    </div>
+  return e("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+    e("div",{style:{fontSize:17,fontWeight:800}},"Kredi Kartları"),
+    e("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(235px,1fr))",gap:11}},
+      state.creditCards.map(c=>{
+        const dl=dLeft(c.dueDay), cl=dLeft(c.cutDay);
+        return e("div",{key:c.id,style:{borderRadius:13,padding:"15px",color:"#fff",background:"linear-gradient(135deg,"+c.color+"dd,"+c.color+"88)",boxShadow:"0 6px 24px rgba(0,0,0,.4)"}},
+          e("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:8}},
+            e("div",{style:{fontSize:15,fontWeight:800}},c.label),
+            e("button",{style:{background:"rgba(0,0,0,.3)",border:"none",color:"#fff",width:22,height:22,borderRadius:5,cursor:"pointer",fontSize:10},onClick:()=>upd(s=>{s.creditCards=s.creditCards.filter(x=>x.id!==c.id)})},"✕")
+          ),
+          e("div",{style:{fontSize:12,opacity:.9,marginBottom:11}},"Limit: "+fmt(c.limit)),
+          e("div",{style:{display:"flex",gap:9,alignItems:"center"}},
+            e("div",{style:{flex:1}},e("div",{style:{fontSize:22,fontWeight:900}},c.cutDay),e("div",{style:{fontSize:10,opacity:.8}},"Hesap Kesim"),e("div",{style:{fontSize:10,color:cl<=3?"#e9c46a":"rgba(255,255,255,.7)",fontWeight:cl<=3?700:400}},cl===31?"Bugün!":cl+"g kaldı")),
+            e("div",{style:{opacity:.4}},"·"),
+            e("div",{style:{flex:1}},e("div",{style:{fontSize:22,fontWeight:900}},c.dueDay),e("div",{style:{fontSize:10,opacity:.8}},"Son Ödeme"),e("div",{style:{fontSize:10,color:dl<=3?"#ff8a80":"rgba(255,255,255,.7)",fontWeight:dl<=3?700:400}},dl===31?"Bugün!":dl+"g kaldı"))
+          )
+        );
+      })
+    ),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"Yeni Kart"),
+      e("div",{style:S.frow},
+        e("input",{style:S.inp,placeholder:"Kart adı",value:form.label,onChange:ev=>setForm(f=>({...f,label:ev.target.value}))}),
+        e("input",{style:S.inp,type:"number",placeholder:"Limit ₺",value:form.limit,onChange:ev=>setForm(f=>({...f,limit:ev.target.value}))})
+      ),
+      e("div",{style:S.frow},
+        e("input",{style:S.inp,type:"number",placeholder:"Hesap kesim günü",value:form.cutDay,onChange:ev=>setForm(f=>({...f,cutDay:ev.target.value}))}),
+        e("input",{style:S.inp,type:"number",placeholder:"Son ödeme günü",value:form.dueDay,onChange:ev=>setForm(f=>({...f,dueDay:ev.target.value}))}),
+        e("input",{type:"color",value:form.color,onChange:ev=>setForm(f=>({...f,color:ev.target.value})),style:{width:38,height:38,border:"none",borderRadius:7,cursor:"pointer"}}),
+        e("button",{style:S.addbtn,onClick:()=>{
+          if(!form.label)return;
+          upd(s=>{s.creditCards=[...s.creditCards,{id:uid(),...form,limit:+form.limit,cutDay:+form.cutDay,dueDay:+form.dueDay}]});
+          setForm({label:"",limit:"",cutDay:"",dueDay:"",color:"#e63946"});
+          toast("Kart eklendi");
+        }},"+ Ekle")
+      )
+    )
   );
 }
 
-// ══ PORTFÖY ════════════════════════════════════
+// ── PORTFOLIO TAB
 function PortfolioTab({state,upd,toast}){
   const prices=state.prices;
   const port=state.portfolio||[];
   const [form,setForm]=useState({label:"",type:"deposit_try",principal:"",quantity:"",rate:"",days:"365",startDate:TODAY,maturityDate:"",currentValue:""});
-
   const isGold=form.type.startsWith("gold_");
   const isDep=form.type.startsWith("deposit_");
   const isFlex=["fund","stock","crypto","other"].includes(form.type);
+  const totalVal=port.filter(p=>p.active).reduce((s,p)=>s+posVal(p,prices),0);
 
   function calcMat(){
     if(form.startDate&&form.days){
-      const d=new Date(form.startDate);
-      d.setDate(d.getDate()+parseInt(form.days));
+      const d=new Date(form.startDate); d.setDate(d.getDate()+parseInt(form.days));
       setForm(f=>({...f,maturityDate:d.toISOString().slice(0,10)}));
     }
   }
 
-  function posValue(pos){
-    if(pos.type.startsWith("gold_")) return pos.quantity*(GOLD_W[pos.type]||1)*prices.gold_gram;
-    if(pos.type==="deposit_try") return pos.principal*(1+(pos.rate||0)/100*(pos.days||365)/365);
-    if(pos.type==="deposit_usd") return pos.principal*(1+(pos.rate||0)/100*(pos.days||365)/365)*prices.usd;
-    if(pos.type==="deposit_eur") return pos.principal*(1+(pos.rate||0)/100*(pos.days||365)/365)*prices.eur;
-    return pos.currentValue||pos.principal||0;
-  }
-
-  const totalVal=port.filter(p=>p.active).reduce((s,p)=>s+posValue(p),0);
-  const upcoming=port.filter(p=>p.active&&p.maturityDate&&daysDiff(p.maturityDate)>=0&&daysDiff(p.maturityDate)<=7)
-    .sort((a,b)=>daysDiff(a.maturityDate)-daysDiff(b.maturityDate));
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{fontSize:18,fontWeight:800}}>Yatırım Portföyü</div>
-      <div style={C.kgrid}>
-        <KCard label="Toplam Portföy" value={fmt(totalVal)} color="#e9c46a" icon="📊"/>
-      </div>
-
-      {upcoming.length>0&&(
-        <div style={{...C.card,borderColor:"rgba(230,57,70,.3)"}}>
-          <div style={C.ctitle}>🔔 Yaklaşan Vadeler</div>
-          {upcoming.map(pos=>{
-            const d=daysDiff(pos.maturityDate);
-            return (
-              <div key={pos.id} style={C.drow}>
-                <div>
-                  <span style={{fontWeight:600}}>{pos.label}</span>
-                  {d===0&&<span style={C.utag}>BUGÜN</span>}
-                </div>
-                <span style={{color:"#ff8a80",fontWeight:700}}>{d===0?"Bugün":d+" gün"}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {port.map(pos=>{
-        const val=posValue(pos);
-        const d=pos.maturityDate?daysDiff(pos.maturityDate):null;
-        let bg="rgba(255,255,255,.03)";
-        if(d!==null){ if(d===0) bg="rgba(230,57,70,.18)"; else if(d<=3) bg="rgba(230,57,70,.1)"; else if(d<=7) bg="rgba(233,196,106,.08)"; else bg="rgba(42,157,143,.07)"; }
-        const interest=pos.type==="deposit_try"?pos.principal*(pos.rate||0)/100*(pos.days||365)/365:0;
-        return (
-          <div key={pos.id} style={{...C.card,background:bg}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-              <div>
-                <div style={{fontWeight:700,fontSize:14}}>
-                  {pos.label}
-                  {d===0&&<span style={C.utag}>VADE BUGÜN</span>}
-                  {d===1&&<span style={C.utag}>YARIN VADE</span>}
-                  {d!==null&&d>1&&d<=3&&<span style={C.utag}>{d+" GÜN"}</span>}
-                </div>
-                <div style={{fontSize:10,color:"#888"}}>{INV_TYPES[pos.type]||pos.type}</div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:16,fontWeight:800,color:"#e9c46a"}}>{fmt(val)}</div>
-                {interest>0&&<div style={{fontSize:10,color:"#2a9d8f"}}>Faiz: {fmt(interest)}</div>}
-              </div>
-            </div>
-            <div style={{marginTop:9,display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7,fontSize:11}}>
-              {pos.quantity>0&&<div><span style={{color:"#666"}}>Miktar: </span><span style={{fontWeight:600}}>{pos.quantity} adet</span></div>}
-              {pos.principal>0&&<div><span style={{color:"#666"}}>Anapara: </span><span style={{fontWeight:600}}>{fmt(pos.principal)}</span></div>}
-              {pos.rate>0&&<div><span style={{color:"#666"}}>Faiz: </span><span style={{fontWeight:600}}>%{pos.rate}</span></div>}
-              {pos.days>0&&<div><span style={{color:"#666"}}>Süre: </span><span style={{fontWeight:600}}>{pos.days} gün</span></div>}
-              {pos.maturityDate&&<div><span style={{color:"#666"}}>Vade: </span><span style={{fontWeight:600,color:d!==null&&d<=3?"#ff8a80":"#e8e8e8"}}>{pos.maturityDate}{d!==null&&<span style={{fontSize:9,color:"#888",marginLeft:4}}>{d===0?"bugün":d<0?Math.abs(d)+"g geçti":d+"g kaldı"}</span>}</span></div>}
-              {pos.startDate&&<div><span style={{color:"#666"}}>Başlangıç: </span><span style={{fontWeight:600}}>{pos.startDate}</span></div>}
-            </div>
-            <div style={{marginTop:9,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              {isFlex&&(
-                <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <input style={{...C.ainp,width:100}} type="number"
-                    defaultValue={pos.currentValue||pos.principal||0}
-                    onBlur={e=>upd(s=>{s.portfolio=s.portfolio.map(p=>p.id===pos.id?{...p,currentValue:+e.target.value}:p);})}/>
-                  <span style={{fontSize:10,color:"#888"}}>₺ güncelle</span>
-                </div>
-              )}
-              <button style={{...C.delbtn,marginLeft:"auto"}}
-                onClick={()=>upd(s=>{s.portfolio=s.portfolio.filter(p=>p.id!==pos.id);})}>✕</button>
-            </div>
-          </div>
-        );
-      })}
-
-      <div style={C.card}>
-        <div style={C.ctitle}>➕ Yeni Pozisyon</div>
-        <div style={C.frow}>
-          <input style={C.inp} placeholder="Pozisyon adı" value={form.label}
-            onChange={e=>setForm(f=>({...f,label:e.target.value}))}/>
-          <select style={C.sel} value={form.type}
-            onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
-            {Object.entries(INV_TYPES).map(([k,v])=><option key={k} value={k}>{v}</option>)}
-          </select>
-        </div>
-        <div style={C.frow}>
-          {isGold&&<input style={C.inp} type="number" placeholder="Adet" value={form.quantity}
-            onChange={e=>setForm(f=>({...f,quantity:e.target.value}))}/>}
-          {(isDep||isFlex)&&<input style={C.inp} type="number" placeholder="Anapara" value={form.principal}
-            onChange={e=>setForm(f=>({...f,principal:e.target.value}))}/>}
-          {isDep&&<input style={C.inp} type="number" placeholder="Yıllık faiz %" value={form.rate}
-            onChange={e=>setForm(f=>({...f,rate:e.target.value}))} step="0.01"/>}
-          {isDep&&<input style={C.inp} type="number" placeholder="Vade gün sayısı" value={form.days}
-            onChange={e=>setForm(f=>({...f,days:e.target.value}))}/>}
-          {isFlex&&<input style={C.inp} type="number" placeholder="Güncel değer ₺" value={form.currentValue}
-            onChange={e=>setForm(f=>({...f,currentValue:e.target.value}))}/>}
-        </div>
-        {(isDep||isGold)&&(
-          <div style={C.frow}>
-            <div style={{flex:1}}><label style={{fontSize:10,color:"#888",display:"block",marginBottom:3}}>Başlangıç</label>
-              <input style={C.inp} type="date" value={form.startDate}
-                onChange={e=>setForm(f=>({...f,startDate:e.target.value}))}/></div>
-            {isDep&&<div style={{flex:1}}><label style={{fontSize:10,color:"#888",display:"block",marginBottom:3}}>Vade Tarihi</label>
-              <div style={{display:"flex",gap:5}}>
-                <input style={C.inp} type="date" value={form.maturityDate}
-                  onChange={e=>setForm(f=>({...f,maturityDate:e.target.value}))}/>
-                <button style={{...C.addbtn,padding:"7px 9px",fontSize:10}} onClick={calcMat}>Hesapla</button>
-              </div>
-            </div>}
-          </div>
-        )}
-        <button style={C.addbtn} onClick={()=>{
-          if(!form.label) return;
-          const pos={id:uid(),active:true,...form,
-            principal:+form.principal||0,quantity:+form.quantity||0,
-            rate:+form.rate||0,days:+form.days||365,currentValue:+form.currentValue||0};
-          upd(s=>{s.portfolio=[...s.portfolio,pos];});
-          setForm({label:"",type:"deposit_try",principal:"",quantity:"",rate:"",days:"365",startDate:TODAY,maturityDate:"",currentValue:""});
-          toast("Pozisyon eklendi ✓");
-        }}>+ Ekle</button>
-      </div>
-    </div>
+  return e("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+    e("div",{style:{fontSize:17,fontWeight:800}},"Yatırım Portföyü"),
+    e("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:4}},
+      e(KCard,{label:"Toplam Portföy",value:fmt(totalVal),color:"#e9c46a",icon:"📊"})
+    ),
+    port.map(pos=>{
+      const val=posVal(pos,prices);
+      const d=pos.maturityDate?dDiff(pos.maturityDate):null;
+      const interest=pos.type==="deposit_try"?pos.principal*(pos.rate||0)/100*(pos.days||365)/365:0;
+      let bg="rgba(255,255,255,.03)";
+      if(d!==null){ if(d===0)bg="rgba(230,57,70,.18)"; else if(d<=3)bg="rgba(230,57,70,.09)"; else if(d<=7)bg="rgba(233,196,106,.07)"; else bg="rgba(42,157,143,.06)"; }
+      return e("div",{key:pos.id,style:{...S.card,background:bg}},
+        e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}},
+          e("div",null,
+            e("div",{style:{fontWeight:700,fontSize:14}},pos.label,d===0&&e("span",{style:S.utag},"VADE BUGÜN"),d===1&&e("span",{style:S.utag},"YARIN"),(d!=null&&d>1&&d<=3)&&e("span",{style:S.utag},d+" GÜN")),
+            e("div",{style:{fontSize:10,color:"#888"}},INV_TYPES[pos.type]||pos.type)
+          ),
+          e("div",{style:{textAlign:"right"}},
+            e("div",{style:{fontSize:15,fontWeight:800,color:"#e9c46a"}},fmt(val)),
+            interest>0&&e("div",{style:{fontSize:10,color:"#2a9d8f"}},"Faiz: "+fmt(interest))
+          )
+        ),
+        e("div",{style:{marginTop:8,display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:6,fontSize:11}},
+          pos.quantity>0&&e("div",null,e("span",{style:{color:"#666"}},"Miktar: "),e("span",{style:{fontWeight:600}},pos.quantity+" adet")),
+          pos.principal>0&&e("div",null,e("span",{style:{color:"#666"}},"Anapara: "),e("span",{style:{fontWeight:600}},fmt(pos.principal))),
+          pos.rate>0&&e("div",null,e("span",{style:{color:"#666"}},"Faiz: "),e("span",{style:{fontWeight:600}},"%"+pos.rate)),
+          pos.days>0&&e("div",null,e("span",{style:{color:"#666"}},"Süre: "),e("span",{style:{fontWeight:600}},pos.days+" gün")),
+          pos.maturityDate&&e("div",null,e("span",{style:{color:"#666"}},"Vade: "),e("span",{style:{fontWeight:600,color:d!==null&&d<=3?"#ff8a80":"#e8e8e8"}},pos.maturityDate,d!==null&&e("span",{style:{fontSize:9,color:"#888",marginLeft:4}},d===0?"bugün":d<0?Math.abs(d)+"g geçti":d+"g kaldı")))
+        ),
+        e("div",{style:{marginTop:8,display:"flex",justifyContent:"flex-end"}},
+          e("button",{style:S.delbtn,onClick:()=>upd(s=>{s.portfolio=s.portfolio.filter(p=>p.id!==pos.id)})},"✕")
+        )
+      );
+    }),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"➕ Yeni Pozisyon"),
+      e("div",{style:S.frow},
+        e("input",{style:S.inp,placeholder:"Pozisyon adı",value:form.label,onChange:ev=>setForm(f=>({...f,label:ev.target.value}))}),
+        e("select",{style:S.sel,value:form.type,onChange:ev=>setForm(f=>({...f,type:ev.target.value}))},
+          Object.entries(INV_TYPES).map(([k,v])=>e("option",{key:k,value:k},v))
+        )
+      ),
+      e("div",{style:S.frow},
+        isGold&&e("input",{style:S.inp,type:"number",placeholder:"Adet",value:form.quantity,onChange:ev=>setForm(f=>({...f,quantity:ev.target.value}))}),
+        (isDep||isFlex)&&e("input",{style:S.inp,type:"number",placeholder:"Anapara",value:form.principal,onChange:ev=>setForm(f=>({...f,principal:ev.target.value}))}),
+        isDep&&e("input",{style:S.inp,type:"number",placeholder:"Yıllık faiz %",value:form.rate,onChange:ev=>setForm(f=>({...f,rate:ev.target.value})),step:"0.01"}),
+        isDep&&e("input",{style:S.inp,type:"number",placeholder:"Vade gün sayısı",value:form.days,onChange:ev=>setForm(f=>({...f,days:ev.target.value}))}),
+        isFlex&&e("input",{style:S.inp,type:"number",placeholder:"Güncel değer ₺",value:form.currentValue,onChange:ev=>setForm(f=>({...f,currentValue:ev.target.value}))})
+      ),
+      (isDep||isGold)&&e("div",{style:S.frow},
+        e("div",{style:{flex:1}},e("label",{style:{fontSize:10,color:"#888",display:"block",marginBottom:3}},"Başlangıç"),e("input",{style:S.inp,type:"date",value:form.startDate,onChange:ev=>setForm(f=>({...f,startDate:ev.target.value}))})),
+        isDep&&e("div",{style:{flex:1}},
+          e("label",{style:{fontSize:10,color:"#888",display:"block",marginBottom:3}},"Vade Tarihi"),
+          e("div",{style:{display:"flex",gap:5}},
+            e("input",{style:S.inp,type:"date",value:form.maturityDate,onChange:ev=>setForm(f=>({...f,maturityDate:ev.target.value}))}),
+            e("button",{style:{...S.addbtn,padding:"7px 9px",fontSize:10},onClick:calcMat},"Hesapla")
+          )
+        )
+      ),
+      e("button",{style:S.addbtn,onClick:()=>{
+        if(!form.label)return;
+        const pos={id:uid(),active:true,...form,principal:+form.principal||0,quantity:+form.quantity||0,rate:+form.rate||0,days:+form.days||365,currentValue:+form.currentValue||0};
+        upd(s=>{s.portfolio=[...s.portfolio,pos]});
+        setForm({label:"",type:"deposit_try",principal:"",quantity:"",rate:"",days:"365",startDate:TODAY,maturityDate:"",currentValue:""});
+        toast("Pozisyon eklendi ✓");
+      }},"+ Ekle")
+    )
   );
 }
 
-// ══ VARLIKLAR ══════════════════════════════════
+// ── ASSETS TAB
 function AssetsTab({state,upd}){
-  const p=state.prices;
-  const a=state.assets;
+  const p=state.prices, a=state.assets;
   const [loading,setLoading]=useState(false);
   const [info,setInfo]=useState(LS.get("price_info",""));
   const [offline,setOffline]=useState(false);
-
   const cashVal=a.cash_try+a.cash_usd*p.usd+a.cash_eur*p.eur+a.other;
-  const portVal=portfolioVal(state.portfolio,p);
-  const nw=cashVal+portVal;
+  const portVal2=portVal(state.portfolio,p);
 
   async function refresh(){
-    setLoading(true);setOffline(false);
+    setLoading(true); setOffline(false);
     try{
       const res=await fetchPrices();
-      const newPrices={};
-      if(res.usd)        newPrices.usd=res.usd;
-      if(res.eur)        newPrices.eur=res.eur;
-      if(res.gold_gram)  newPrices.gold_gram=res.gold_gram;
-      upd(s=>{s.prices={...s.prices,...newPrices};});
-      LS.set("cached_prices",newPrices);
+      const np={};
+      if(res.usd)       np.usd=res.usd;
+      if(res.eur)       np.eur=res.eur;
+      if(res.gold_gram) np.gold_gram=res.gold_gram;
+      upd(s=>{s.prices={...s.prices,...np}});
+      LS.set("cached_prices",np);
       const t=new Date().toLocaleTimeString("tr-TR");
-      LS.set("price_info",t);setInfo(t);
-    } catch(e){
-      const cached=LS.get("cached_prices",null);
-      if(cached){ upd(s=>{s.prices={...s.prices,...cached};}); setOffline(true); }
+      LS.set("price_info",t); setInfo(t);
+    } catch(_){
+      const c=LS.get("cached_prices",null);
+      if(c){ upd(s=>{s.prices={...s.prices,...c}}); setOffline(true); }
     }
     setLoading(false);
   }
 
-  useEffect(()=>{
-    const last=LS.get("price_ts",0);
-    if(Date.now()-last>30*60*1000){ refresh(); LS.set("price_ts",Date.now()); }
-  },[]);
+  useEffect(()=>{ const last=LS.get("price_ts",0); if(Date.now()-last>30*60*1000){ refresh(); LS.set("price_ts",Date.now()) } },[]);
 
-  const priceItems=[
+  const priceGrid=[
     {label:"Gram Altın",value:p.gold_gram,unit:"₺/gr",color:"#f4a261"},
-    {label:"Çeyrek",value:Math.round(p.gold_gram*1.75),unit:"₺",color:"#f4a261"},
-    {label:"Yarım",value:Math.round(p.gold_gram*3.5),unit:"₺",color:"#f4a261"},
-    {label:"Tam",value:Math.round(p.gold_gram*7),unit:"₺",color:"#f4a261"},
+    {label:"Çeyrek Altın",value:Math.round(p.gold_gram*1.75),unit:"₺",color:"#f4a261"},
+    {label:"Yarım Altın",value:Math.round(p.gold_gram*3.5),unit:"₺",color:"#f4a261"},
+    {label:"Tam Altın",value:Math.round(p.gold_gram*7),unit:"₺",color:"#f4a261"},
     {label:"USD/TL",value:p.usd,unit:"₺",color:"#4285f4"},
     {label:"EUR/TL",value:p.eur,unit:"₺",color:"#34a853"},
   ];
 
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{fontSize:18,fontWeight:800}}>Varlık Takibi</div>
-      <div style={C.kgrid}>
-        <KCard label="Toplam Varlık"   value={fmt(nw)}      color="#e9c46a" icon="◈"/>
-        <KCard label="Nakit & Banka"   value={fmt(cashVal)} color="#2a9d8f" icon="₺"/>
-        <KCard label="Portföy"         value={fmt(portVal)} color="#f4a261" icon="📊"/>
-      </div>
-
-      <div style={{...C.card,borderColor:"rgba(233,196,106,.2)"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:11}}>
-          <div style={C.ctitle}>📡 Canlı Fiyatlar</div>
-          <button style={{...C.addbtn,padding:"5px 11px",fontSize:11,opacity:loading?0.6:1}}
-            onClick={refresh} disabled={loading}>
-            {loading?"⏳ Çekiliyor...":"↻ Güncelle"}
-          </button>
-        </div>
-        {offline&&<div style={{color:"#e9c46a",fontSize:11,marginBottom:7}}>📴 Çevrimdışı — son kayıtlı fiyatlar kullanılıyor</div>}
-        {info&&!offline&&<div style={{color:"#555",fontSize:10,marginBottom:10}}>Son güncelleme: {info} · gold-api.com & frankfurter.app</div>}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:8}}>
-          {priceItems.map(it=>(
-            <div key={it.label} style={{background:"rgba(255,255,255,.04)",borderRadius:9,padding:"8px 10px",border:"1px solid "+it.color+"22"}}>
-              <div style={{fontSize:9,color:"#888",marginBottom:3}}>{it.label}</div>
-              <div style={{fontSize:14,fontWeight:800,color:it.color}}>{it.value>0?it.value.toLocaleString("tr-TR"):"—"}</div>
-              <div style={{fontSize:9,color:"#555",marginTop:2}}>{it.unit}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{...C.frow,marginTop:11}}>
-          {[["gold_gram","Gram Altın (₺)"],["usd","USD/TL"],["eur","EUR/TL"]].map(([k,l])=>(
-            <div key={k} style={{flex:1}}>
-              <label style={{fontSize:10,color:"#888",display:"block",marginBottom:3}}>{l} (manuel)</label>
-              <input style={C.inp} type="number" value={p[k]}
-                onChange={e=>upd(s=>{s.prices={...s.prices,[k]:+e.target.value};})}/>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={C.card}>
-        <div style={C.ctitle}>💵 Nakit ve Banka</div>
-        {[["cash_try","Nakit TL","₺",1],["cash_usd","Dolar","$",p.usd],["cash_eur","Euro","€",p.eur],["other","Diğer","₺",1]].map(([k,l,u,rate])=>(
-          <div key={k} style={C.lrow}>
-            <div>
-              <div style={{color:"#ccc",fontSize:13}}>{l}</div>
-              {a[k]>0&&u!=="₺"&&<div style={{fontSize:9,color:"#2a9d8f"}}>{fmt(a[k]*rate)}</div>}
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:5}}>
-              <input style={C.ainp} type="number" value={a[k]}
-                onChange={e=>upd(s=>{s.assets={...s.assets,[k]:+e.target.value};})}/>
-              <span style={{fontSize:11,color:"#888"}}>{u}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+  return e("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+    e("div",{style:{fontSize:17,fontWeight:800}},"Varlık Takibi"),
+    e("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:4}},
+      e(KCard,{label:"Toplam Varlık",value:fmt(cashVal+portVal2),color:"#e9c46a",icon:"◈"}),
+      e(KCard,{label:"Nakit & Banka",value:fmt(cashVal),color:"#2a9d8f",icon:"₺"}),
+      e(KCard,{label:"Portföy",value:fmt(portVal2),color:"#f4a261",icon:"📊"})
+    ),
+    e("div",{style:{...S.card,borderColor:"rgba(233,196,106,.2)"}},
+      e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
+        e("div",{style:S.ctitle},"📡 Canlı Fiyatlar"),
+        e("button",{style:{...S.addbtn,padding:"5px 10px",fontSize:11,opacity:loading?.6:1},onClick:refresh,disabled:loading},loading?"⏳ Çekiliyor...":"↻ Güncelle")
+      ),
+      offline&&e("div",{style:{color:"#e9c46a",fontSize:11,marginBottom:6}},"📴 Çevrimdışı — son kayıtlı fiyatlar"),
+      info&&!offline&&e("div",{style:{color:"#555",fontSize:10,marginBottom:9}},"Son güncelleme: "+info+" · gold-api.com & frankfurter.app"),
+      e("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7}},
+        priceGrid.map(it=>e("div",{key:it.label,style:{background:"rgba(255,255,255,.04)",borderRadius:8,padding:"7px 10px",border:"1px solid "+it.color+"22"}},
+          e("div",{style:{fontSize:9,color:"#888",marginBottom:2}},it.label),
+          e("div",{style:{fontSize:13,fontWeight:800,color:it.color}},it.value>0?it.value.toLocaleString("tr-TR"):"—"),
+          e("div",{style:{fontSize:9,color:"#555",marginTop:1}},it.unit)
+        ))
+      ),
+      e("div",{style:{...S.frow,marginTop:10}},
+        [["gold_gram","Gram Altın (₺)"],["usd","USD/TL"],["eur","EUR/TL"]].map(([k,l])=>
+          e("div",{key:k,style:{flex:1}},
+            e("label",{style:{fontSize:10,color:"#888",display:"block",marginBottom:3}},l+" (manuel)"),
+            e("input",{style:S.inp,type:"number",value:p[k],onChange:ev=>upd(s=>{s.prices={...s.prices,[k]:+ev.target.value}})})
+          )
+        )
+      )
+    ),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"💵 Nakit ve Banka"),
+      [["cash_try","Nakit TL","₺",1],["cash_usd","Dolar","$",p.usd],["cash_eur","Euro","€",p.eur],["other","Diğer","₺",1]].map(([k,l,u,rate])=>
+        e("div",{key:k,style:S.lrow},
+          e("div",null,e("div",{style:{color:"#ccc",fontSize:13}},l),a[k]>0&&u!=="₺"&&e("div",{style:{fontSize:9,color:"#2a9d8f"}},fmt(a[k]*rate))),
+          e("div",{style:{display:"flex",alignItems:"center",gap:5}},
+            e("input",{style:S.ainp,type:"number",value:a[k],onChange:ev=>upd(s=>{s.assets={...s.assets,[k]:+ev.target.value}})}),
+            e("span",{style:{fontSize:11,color:"#888"}},u)
+          )
+        )
+      )
+    )
   );
 }
 
-// ══ PROJEKSİYON ════════════════════════════════
+// ── FORECAST TAB
 function ForecastTab({forecast}){
   const maxVal=Math.max(...forecast.map(r=>Math.max(r.inc,r.exp)),1);
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{fontSize:18,fontWeight:800}}>Yıl Sonu Projeksiyon · {CY}</div>
-      <div style={C.card}>
-        <div style={C.ctitle}>Aylık Tablo</div>
-        <div style={{overflowX:"auto"}}>
-          <table style={C.tbl}>
-            <thead>
-              <tr>
-                <th style={C.th}>Ay</th>
-                <th style={{...C.th,color:"#2a9d8f"}}>Gelir</th>
-                <th style={{...C.th,color:"#e63946"}}>Gider</th>
-                <th style={C.th}>Net</th>
-                <th style={C.th}>Birikimli</th>
-              </tr>
-            </thead>
-            <tbody>
-              {forecast.map((row,i)=>(
-                <tr key={i} style={{background:i===CM?"rgba(233,196,106,.1)":"transparent"}}>
-                  <td style={{...C.td,textAlign:"left",fontWeight:i===CM?700:400}}>{FULL_MONTHS[row.m]}</td>
-                  <td style={{...C.td,color:"#2a9d8f"}}>{fmt(row.inc)}</td>
-                  <td style={{...C.td,color:"#e63946"}}>{fmt(row.exp)}</td>
-                  <td style={{...C.td,color:row.net>=0?"#2a9d8f":"#e63946",fontWeight:600}}>{fmt(row.net)}</td>
-                  <td style={{...C.td,color:row.cum>=0?"#e9c46a":"#e63946",fontWeight:700}}>{fmt(row.cum)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div style={C.card}>
-        <div style={C.ctitle}>Bar Grafik</div>
-        <div style={C.bc}>
-          {forecast.map((row,i)=>(
-            <div key={i} style={C.bg}>
-              <div style={C.bp}>
-                <div style={{...C.bar,height:Math.round((row.inc/maxVal)*95)+"%",background:"#2a9d8f"}}/>
-                <div style={{...C.bar,height:Math.round((row.exp/maxVal)*95)+"%",background:"#e63946"}}/>
-              </div>
-              <div style={{fontSize:9,color:i===CM?"#e9c46a":"#888",fontWeight:i===CM?700:400}}>{MONTHS[i]}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{marginTop:8,fontSize:11,color:"#888"}}>
-          <span style={{color:"#2a9d8f"}}>■ Gelir</span>
-          <span style={{color:"#e63946",marginLeft:12}}>■ Gider</span>
-        </div>
-      </div>
-    </div>
+  return e("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+    e("div",{style:{fontSize:17,fontWeight:800}},"Yıl Sonu Projeksiyon · "+CY),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"Aylık Tablo"),
+      e("div",{style:{overflowX:"auto"}},
+        e("table",{style:S.tbl},
+          e("thead",null,e("tr",null,e("th",{style:{...S.th(),textAlign:"left"}},"Ay"),e("th",{style:S.th("#2a9d8f")},"Gelir"),e("th",{style:S.th("#e63946")},"Gider"),e("th",{style:S.th()},"Net"),e("th",{style:S.th()},"Birikimli"))),
+          e("tbody",null,forecast.map((row,i)=>e("tr",{key:i,style:{background:i===CM?"rgba(233,196,106,.1)":"transparent"}},
+            e("td",{style:{...S.td,textAlign:"left",fontWeight:i===CM?700:400}},FULL_MONTHS[row.m]),
+            e("td",{style:{...S.td,color:"#2a9d8f"}},fmt(row.inc)),
+            e("td",{style:{...S.td,color:"#e63946"}},fmt(row.exp)),
+            e("td",{style:{...S.td,color:row.net>=0?"#2a9d8f":"#e63946",fontWeight:600}},fmt(row.net)),
+            e("td",{style:{...S.td,color:row.cum>=0?"#e9c46a":"#e63946",fontWeight:700}},fmt(row.cum))
+          )))
+        )
+      )
+    ),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"Bar Grafik"),
+      e("div",{style:{display:"flex",gap:5,alignItems:"flex-end",height:115,marginTop:8}},
+        forecast.map((row,i)=>e("div",{key:i,style:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}},
+          e("div",{style:{width:"100%",display:"flex",gap:2,alignItems:"flex-end",height:92}},
+            e("div",{style:{flex:1,height:Math.round((row.inc/maxVal)*90)+"%",background:"#2a9d8f",borderRadius:"3px 3px 0 0",minHeight:3}}),
+            e("div",{style:{flex:1,height:Math.round((row.exp/maxVal)*90)+"%",background:"#e63946",borderRadius:"3px 3px 0 0",minHeight:3}})
+          ),
+          e("div",{style:{fontSize:9,color:i===CM?"#e9c46a":"#888",fontWeight:i===CM?700:400}},MONTHS[i])
+        ))
+      ),
+      e("div",{style:{marginTop:8,fontSize:11,color:"#888"}},
+        e("span",{style:{color:"#2a9d8f"}},"■ Gelir"),e("span",{style:{color:"#e63946",marginLeft:12}},"■ Gider")
+      )
+    )
   );
 }
 
-// ══ BÜTÇELER ═══════════════════════════════════
+// ── BUDGETS TAB
 function BudgetsTab({state,upd,toast}){
   const [form,setForm]=useState({label:"",amount:"",month:CM,year:CY,note:""});
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{fontSize:18,fontWeight:800}}>Özel Bütçe Dönemleri</div>
-      {state.budgets.length===0&&<div style={C.empty}>Tatil, düğün, hediye gibi özel harcamalar ekleyin.</div>}
-      <div style={{display:"grid",gap:10,gridTemplateColumns:"repeat(auto-fill,minmax(255px,1fr))"}}>
-        {state.budgets.map(b=>(
-          <div key={b.id} style={{...C.card,border:"1px solid rgba(233,196,106,.2)"}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}>
-              <div>
-                <div style={{fontWeight:700,fontSize:14}}>{b.label}</div>
-                <div style={{fontSize:10,color:"#888"}}>{FULL_MONTHS[b.month]} {b.year}</div>
-              </div>
-              <button style={C.delbtn} onClick={()=>upd(s=>{s.budgets=s.budgets.filter(x=>x.id!==b.id);})}>✕</button>
-            </div>
-            <div style={{fontSize:20,fontWeight:900,color:"#e9c46a"}}>{fmt(b.amount)}</div>
-            {b.note&&<div style={{fontSize:10,color:"#888",marginTop:5}}>{b.note}</div>}
-          </div>
-        ))}
-      </div>
-      <div style={C.card}>
-        <div style={C.ctitle}>Yeni Bütçe</div>
-        <div style={C.frow}>
-          <input style={C.inp} placeholder="Bütçe adı (ör: Tatil)" value={form.label}
-            onChange={e=>setForm(f=>({...f,label:e.target.value}))}/>
-          <input style={C.inp} type="number" placeholder="Tutar ₺" value={form.amount}
-            onChange={e=>setForm(f=>({...f,amount:e.target.value}))}/>
-        </div>
-        <div style={C.frow}>
-          <select style={C.sel} value={form.month}
-            onChange={e=>setForm(f=>({...f,month:+e.target.value}))}>
-            {FULL_MONTHS.map((m,i)=><option key={i} value={i}>{m}</option>)}
-          </select>
-          <input style={C.inp} type="number" placeholder="Yıl" value={form.year}
-            onChange={e=>setForm(f=>({...f,year:+e.target.value}))}/>
-          <input style={C.inp} placeholder="Not" value={form.note}
-            onChange={e=>setForm(f=>({...f,note:e.target.value}))}/>
-          <button style={C.addbtn} onClick={()=>{
-            if(!form.label||!form.amount) return;
-            upd(s=>{s.budgets=[...s.budgets,{id:uid(),...form,amount:+form.amount}];});
-            setForm({label:"",amount:"",month:CM,year:CY,note:""});
-            toast("Bütçe eklendi");
-          }}>+ Ekle</button>
-        </div>
-      </div>
-    </div>
+  return e("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+    e("div",{style:{fontSize:17,fontWeight:800}},"Özel Bütçe Dönemleri"),
+    state.budgets.length===0&&e("div",{style:{color:"#666",fontSize:12,padding:"8px 0"}},"Tatil, düğün gibi özel harcamalar ekleyin."),
+    e("div",{style:{display:"grid",gap:9,gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))"}},
+      state.budgets.map(b=>e("div",{key:b.id,style:{...S.card,border:"1px solid rgba(233,196,106,.2)"}},
+        e("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:6}},
+          e("div",null,e("div",{style:{fontWeight:700,fontSize:14}},b.label),e("div",{style:{fontSize:10,color:"#888"}},FULL_MONTHS[b.month]+" "+b.year)),
+          e("button",{style:S.delbtn,onClick:()=>upd(s=>{s.budgets=s.budgets.filter(x=>x.id!==b.id)})},"✕")
+        ),
+        e("div",{style:{fontSize:19,fontWeight:900,color:"#e9c46a"}},fmt(b.amount)),
+        b.note&&e("div",{style:{fontSize:10,color:"#888",marginTop:5}},b.note)
+      ))
+    ),
+    e("div",{style:S.card},
+      e("div",{style:S.ctitle},"Yeni Bütçe"),
+      e("div",{style:S.frow},
+        e("input",{style:S.inp,placeholder:"Bütçe adı (ör: Tatil)",value:form.label,onChange:ev=>setForm(f=>({...f,label:ev.target.value}))}),
+        e("input",{style:S.inp,type:"number",placeholder:"Tutar ₺",value:form.amount,onChange:ev=>setForm(f=>({...f,amount:ev.target.value}))})
+      ),
+      e("div",{style:S.frow},
+        e("select",{style:S.sel,value:form.month,onChange:ev=>setForm(f=>({...f,month:+ev.target.value}))},
+          FULL_MONTHS.map((m,i)=>e("option",{key:i,value:i},m))
+        ),
+        e("input",{style:S.inp,type:"number",placeholder:"Yıl",value:form.year,onChange:ev=>setForm(f=>({...f,year:+ev.target.value}))}),
+        e("input",{style:S.inp,placeholder:"Not",value:form.note,onChange:ev=>setForm(f=>({...f,note:ev.target.value}))}),
+        e("button",{style:S.addbtn,onClick:()=>{
+          if(!form.label||!form.amount)return;
+          upd(s=>{s.budgets=[...s.budgets,{id:uid(),...form,amount:+form.amount}]});
+          setForm({label:"",amount:"",month:CM,year:CY,note:""});
+          toast("Bütçe eklendi");
+        }},"+ Ekle")
+      )
+    )
   );
 }
 
-// ══ ANA UYGULAMA ═══════════════════════════════
+// ── MAIN APP
 function App(){
-  const [state,setState] = useState(()=>{
-    const saved=LS.get("butce_v5",null);
-    return saved ? {...mkDefault(),...saved} : mkDefault();
-  });
-  const [toastMsg,setToastMsg] = useState(null);
-  const [driveToken,setDriveToken] = useState(null);
-  const [driveStatus,setDriveStatus] = useState("idle");
-  const [lastSync,setLastSync] = useState(LS.get("last_sync",""));
-  const tokenRef = useRef(null);
+  const [state,setState]=useState(()=>{ const s=LS.get("butce_v6",null); return s?{...mkDefault(),...s}:mkDefault() });
+  const [toastMsg,setToastMsg]=useState(null);
+  const [driveToken,setDriveToken]=useState(null);
+  const [dStatus,setDStatus]=useState("idle");
+  const [lastSync,setLastSync]=useState(LS.get("last_sync",""));
+  const tokenRef=useRef(null);
 
-  useEffect(()=>{ LS.set("butce_v5",state); },[state]);
+  useEffect(()=>{ LS.set("butce_v6",state) },[state]);
+  useEffect(()=>{ if(toastMsg){ const t=setTimeout(()=>setToastMsg(null),2800); return ()=>clearTimeout(t) } },[toastMsg]);
 
-  useEffect(()=>{
-    if(toastMsg){ const t=setTimeout(()=>setToastMsg(null),3000); return ()=>clearTimeout(t); }
-  },[toastMsg]);
+  const toast=msg=>setToastMsg(msg);
+  const upd=useCallback(fn=>setState(s=>{ const n={...s}; fn(n); return n }),[]);
 
-  const toast = (msg) => setToastMsg(msg);
-  const upd = useCallback((fn)=>setState(s=>{ const n={...s}; fn(n); return n; }),[]);
-
-  // Google Drive init
   useEffect(()=>{
     const iv=setInterval(()=>{
       if(window.google&&window.google.accounts&&window.google.accounts.oauth2){
         clearInterval(iv);
         tokenRef.current=window.google.accounts.oauth2.initTokenClient({
-          client_id:CLIENT_ID, scope:SCOPES,
-          callback:(resp)=>{
-            if(resp.error){ toast("Drive bağlantı hatası"); return; }
-            setDriveToken(resp.access_token);
-            toast("Drive'a bağlandı ✓");
-          }
+          client_id:CLIENT_ID,scope:SCOPES,
+          callback:resp=>{ if(resp.error){toast("Drive hatası");return} setDriveToken(resp.access_token); toast("Drive bağlandı ✓") }
         });
       }
     },300);
     return ()=>clearInterval(iv);
   },[]);
 
-  // Bildirim kontrolü
-  useEffect(()=>{ checkNotifs(state); },[]);
+  useEffect(()=>{ checkNotifs(state) },[]);
 
-  function connectDrive(){ if(tokenRef.current) tokenRef.current.requestAccessToken(); }
+  function connectDrive(){ if(tokenRef.current)tokenRef.current.requestAccessToken() }
 
   async function saveDrive(){
-    if(!driveToken){ connectDrive(); return; }
-    setDriveStatus("saving");
-    try{
-      await driveSave(driveToken,state);
-      const t=new Date().toLocaleTimeString("tr-TR");
-      setLastSync(t); LS.set("last_sync",t);
-      setDriveStatus("ok"); toast("Drive'a kaydedildi ✓");
-    } catch(e){ setDriveStatus("err"); toast("Kaydetme hatası"); }
+    if(!driveToken){connectDrive();return}
+    setDStatus("saving");
+    try{ await dSave(driveToken,state); const t=new Date().toLocaleTimeString("tr-TR"); setLastSync(t); LS.set("last_sync",t); setDStatus("ok"); toast("Drive'a kaydedildi ✓") }
+    catch(_){ setDStatus("err"); toast("Kaydetme hatası") }
   }
 
   async function loadDrive(){
-    if(!driveToken){ connectDrive(); return; }
-    setDriveStatus("loading");
-    try{
-      const data=await driveLoad(driveToken);
-      if(data){ setState({...mkDefault(),...data}); toast("Drive'dan yüklendi ✓"); }
-      else toast("Drive'da kayıt bulunamadı");
-      setDriveStatus("ok");
-    } catch(e){ setDriveStatus("err"); toast("Yükleme hatası"); }
+    if(!driveToken){connectDrive();return}
+    setDStatus("loading");
+    try{ const data=await driveLoad(driveToken); if(data){setState({...mkDefault(),...data});toast("Drive'dan yüklendi ✓")}else toast("Drive'da kayıt yok"); setDStatus("ok") }
+    catch(_){ setDStatus("err"); toast("Yükleme hatası") }
   }
 
-  async function reqNotif(){
-    if("Notification" in window){
-      const r=await Notification.requestPermission();
-      if(r==="granted"){ toast("Bildirimler aktif 🔔"); checkNotifs(state); }
-    }
-  }
+  async function reqNotif(){ if("Notification" in window){ const r=await Notification.requestPermission(); if(r==="granted"){toast("Bildirimler aktif 🔔");checkNotifs(state)} } }
 
-  function togglePay(mk,itemId){
-    upd(s=>{
-      const md={...(s.monthlyData[mk]||{})};
-      const pays={...(md.payments||{})};
-      pays[itemId]=!pays[itemId];
-      md.payments=pays;
-      s.monthlyData={...s.monthlyData,[mk]:md};
-    });
+  function togglePay(mk,id){
+    upd(s=>{ const md={...(s.monthlyData[mk]||{})}; const pays={...(md.payments||{})}; pays[id]=!pays[id]; md.payments=pays; s.monthlyData={...s.monthlyData,[mk]:md} });
     toast("Ödeme güncellendi ✓");
   }
-
-  function toggleInc(mk,itemId){
-    upd(s=>{
-      const md={...(s.monthlyData[mk]||{})};
-      const ic={...(md.incomeCollected||{})};
-      ic[itemId]=!ic[itemId];
-      md.incomeCollected=ic;
-      s.monthlyData={...s.monthlyData,[mk]:md};
-    });
+  function toggleInc(mk,id){
+    upd(s=>{ const md={...(s.monthlyData[mk]||{})}; const ic={...(md.incomeCollected||{})}; ic[id]=!ic[id]; md.incomeCollected=ic; s.monthlyData={...s.monthlyData,[mk]:md} });
     toast("Gelir güncellendi ✓");
   }
 
-  // Bugünkü ödemeler
   function todayDue(){
-    const k=mkey(CY,CM);
-    const pays=((state.monthlyData[k]||{}).payments)||{};
+    const k=mkey(CY,CM), pays=((state.monthlyData[k]||{}).payments)||{};
     const due=[];
-    state.expenseItems.filter(i=>i.active&&i.dueDay===CD&&!pays[i.id])
-      .forEach(i=>due.push({...i,mk:k}));
-    state.creditCards.forEach(c=>{
-      if(c.dueDay===CD) due.push({id:c.id,label:c.label+" Son Ödeme",mk:k,isCard:true});
-      if(c.cutDay===CD) due.push({id:"cut_"+c.id,label:c.label+" Hesap Kesim",mk:k,isCard:true,isCut:true});
-    });
+    state.expenseItems.filter(i=>i.active&&i.dueDay===CD&&!pays[i.id]).forEach(i=>due.push({...i,mk:k}));
+    state.creditCards.forEach(c=>{ if(c.dueDay===CD)due.push({id:c.id,label:c.label+" Son Ödeme",mk:k,isCard:true}); if(c.cutDay===CD)due.push({id:"cut_"+c.id,label:c.label+" Hesap Kesim",mk:k,isCard:true,isCut:true}) });
     return due;
   }
-
   function todayInc(){
-    const k=mkey(CY,CM);
-    const ic=((state.monthlyData[k]||{}).incomeCollected)||{};
+    const k=mkey(CY,CM), ic=((state.monthlyData[k]||{}).incomeCollected)||{};
     return state.incomeItems.filter(i=>i.active&&i.incomeDay===CD&&!ic[i.id]);
   }
 
-  // Forecast
   let cum=0;
-  const forecast=Array.from({length:12},(_,m)=>{
-    const inc=monthIncome(state,CY,m);
-    const exp=monthExpense(state,CY,m);
-    cum+=inc-exp;
-    return {m,inc,exp,net:inc-exp,cum};
-  });
+  const forecast=Array.from({length:12},(_,m)=>{ const inc=mIncome(state,CY,m),exp=mExpense(state,CY,m); cum+=inc-exp; return{m,inc,exp,net:inc-exp,cum} });
 
-  const due=todayDue();
-  const tInc=todayInc();
+  const due=todayDue(), tInc=todayInc();
   const tab=state.activeTab;
-  const setTab=t=>upd(s=>{s.activeTab=t;});
+  const setTab=t=>upd(s=>{s.activeTab=t});
 
-  const TABS=[
-    {id:"dashboard",icon:"◉",label:"Özet"},
-    {id:"income",icon:"↑",label:"Gelirler"},
-    {id:"expenses",icon:"↓",label:"Giderler"},
-    {id:"payments",icon:"✓",label:"Ödemeler"},
-    {id:"cards",icon:"▣",label:"Kartlar"},
-    {id:"portfolio",icon:"📊",label:"Portföy"},
-    {id:"assets",icon:"◈",label:"Varlıklar"},
-    {id:"forecast",icon:"⤴",label:"Projeksiyon"},
-    {id:"budgets",icon:"◎",label:"Bütçeler"},
-  ];
+  const TABS=[{id:"dashboard",icon:"◉",label:"Özet"},{id:"income",icon:"↑",label:"Gelirler"},{id:"expenses",icon:"↓",label:"Giderler"},{id:"payments",icon:"✓",label:"Ödemeler"},{id:"cards",icon:"▣",label:"Kartlar"},{id:"portfolio",icon:"📊",label:"Portföy"},{id:"assets",icon:"◈",label:"Varlıklar"},{id:"forecast",icon:"⤴",label:"Projeksiyon"},{id:"budgets",icon:"◎",label:"Bütçeler"}];
 
-  return (
-    <div style={C.root}>
-      <header style={C.header}>
-        <div style={C.hL}>
-          <div style={C.logo}>₺</div>
-          <div>
-            <div style={{fontWeight:800,fontSize:15,letterSpacing:"-0.3px"}}>Bütçe Defterim</div>
-            <div style={{fontSize:10,color:"#888"}}>{CY} · Kişisel Finans</div>
-          </div>
-        </div>
-        <div style={C.hR}>
-          {tInc.length>0&&<div style={badge("rgba(42,157,143,.2)","rgba(42,157,143,.4)","#2a9d8f")} onClick={()=>setTab("payments")}>💰 {tInc.length} gelir bugün</div>}
-          {due.length>0&&<div style={badge("rgba(230,57,70,.25)","rgba(230,57,70,.5)","#ff8a80")} onClick={()=>setTab("payments")}>🔔 {due.length} ödeme bugün</div>}
-          {Notification.permission!=="granted"&&<button style={btn("rgba(233,196,106,.15)","#e9c46a","rgba(233,196,106,.4)")} onClick={reqNotif}>🔔 Bildirimleri Aç</button>}
-          {!driveToken
-            ?<button style={btn("rgba(66,133,244,.2)","#4285f4","rgba(66,133,244,.4)")} onClick={connectDrive}>☁ Drive</button>
-            :<>
-              <button style={btn("rgba(42,157,143,.2)","#2a9d8f","rgba(42,157,143,.4)")} onClick={saveDrive}>
-                {driveStatus==="saving"?"⏳":"↑ Kaydet"}
-              </button>
-              <button style={btn("rgba(233,196,106,.15)","#e9c46a","rgba(233,196,106,.3)")} onClick={loadDrive}>
-                {driveStatus==="loading"?"⏳":"↓ Yükle"}
-              </button>
-            </>
-          }
-        </div>
-      </header>
+  function hbtn(bg,color,border,label,onClick){
+    return e("button",{style:{padding:"5px 10px",borderRadius:8,fontSize:11,cursor:"pointer",border:"1px solid "+border,background:bg,color,fontWeight:700},onClick},label);
+  }
 
-      {driveToken&&(
-        <div style={C.syncBar}>
-          <span>☁</span>
-          <span>Drive bağlı{lastSync?" · Son kayıt: "+lastSync:" · Henüz kaydedilmedi"}</span>
-          <span style={{marginLeft:"auto",color:"#444"}}>Sadece sizin Drive'ınızda</span>
-        </div>
-      )}
-
-      <nav style={C.nav}>
-        {TABS.map(t=>(
-          <button key={t.id}
-            style={{...{display:"flex",alignItems:"center",gap:5,padding:"7px 11px",borderRadius:8,border:"none",background:"transparent",color:"#888",cursor:"pointer",fontSize:12,fontWeight:500,whiteSpace:"nowrap"},
-                   ...(tab===t.id?{background:"rgba(233,196,106,.15)",color:"#e9c46a",fontWeight:700}:{})}}
-            onClick={()=>setTab(t.id)}>
-            <span>{t.icon}</span><span>{t.label}</span>
-          </button>
-        ))}
-      </nav>
-
-      <main style={C.main}>
-        {tab==="dashboard" &&<Dashboard state={state} forecast={forecast} due={due} todayInc={tInc} togglePay={togglePay} toggleInc={toggleInc}/>}
-        {tab==="income"    &&<IncomeTab state={state} upd={upd} toast={toast}/>}
-        {tab==="expenses"  &&<ExpensesTab state={state} upd={upd} toast={toast}/>}
-        {tab==="payments"  &&<PaymentsTab state={state} togglePay={togglePay} toggleInc={toggleInc}/>}
-        {tab==="cards"     &&<CardsTab state={state} upd={upd} toast={toast}/>}
-        {tab==="portfolio" &&<PortfolioTab state={state} upd={upd} toast={toast}/>}
-        {tab==="assets"    &&<AssetsTab state={state} upd={upd}/>}
-        {tab==="forecast"  &&<ForecastTab forecast={forecast}/>}
-        {tab==="budgets"   &&<BudgetsTab state={state} upd={upd} toast={toast}/>}
-      </main>
-
-      {toastMsg&&(
-        <div style={{...C.toast,background:"#2a9d8f"}}>{toastMsg}</div>
-      )}
-    </div>
+  return e("div",{style:{minHeight:"100vh",background:"#0f0f13",color:"#e8e8e8"}},
+    // Header
+    e("header",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",background:"rgba(255,255,255,.04)",borderBottom:"1px solid rgba(255,255,255,.08)",position:"sticky",top:0,zIndex:100,flexWrap:"wrap",gap:7}},
+      e("div",{style:{display:"flex",alignItems:"center",gap:11}},
+        e("div",{style:{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,#e9c46a,#f4a261)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:900,color:"#0f0f13"}},"₺"),
+        e("div",null,e("div",{style:{fontWeight:800,fontSize:14,letterSpacing:"-0.3px"}},"Bütçe Defterim"),e("div",{style:{fontSize:10,color:"#888"}},CY+" · Kişisel Finans"))
+      ),
+      e("div",{style:{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}},
+        tInc.length>0&&e("div",{style:{background:"rgba(42,157,143,.2)",border:"1px solid rgba(42,157,143,.4)",color:"#2a9d8f",padding:"4px 9px",borderRadius:20,fontSize:11,cursor:"pointer",fontWeight:600},onClick:()=>setTab("payments")},"💰 "+tInc.length+" gelir bugün"),
+        due.length>0&&e("div",{style:{background:"rgba(230,57,70,.25)",border:"1px solid rgba(230,57,70,.5)",color:"#ff8a80",padding:"4px 9px",borderRadius:20,fontSize:11,cursor:"pointer",fontWeight:600},onClick:()=>setTab("payments")},"🔔 "+due.length+" ödeme bugün"),
+        Notification.permission!=="granted"&&hbtn("rgba(233,196,106,.15)","#e9c46a","rgba(233,196,106,.4)","🔔 Bildirimleri Aç",reqNotif),
+        !driveToken
+          ?hbtn("rgba(66,133,244,.2)","#4285f4","rgba(66,133,244,.4)","☁ Drive",connectDrive)
+          :e("div",{style:{display:"flex",gap:5}},
+            hbtn("rgba(42,157,143,.2)","#2a9d8f","rgba(42,157,143,.4)",dStatus==="saving"?"⏳":"↑ Kaydet",saveDrive),
+            hbtn("rgba(233,196,106,.15)","#e9c46a","rgba(233,196,106,.3)",dStatus==="loading"?"⏳":"↓ Yükle",loadDrive)
+          )
+      )
+    ),
+    // Sync bar
+    driveToken&&e("div",{style:{fontSize:11,padding:"5px 14px",background:"rgba(42,157,143,.07)",borderBottom:"1px solid rgba(42,157,143,.13)",display:"flex",alignItems:"center",gap:7,color:"#2a9d8f"}},
+      "☁ Drive bağlı"+(lastSync?" · Son kayıt: "+lastSync:" · Henüz kaydedilmedi"),
+      e("span",{style:{marginLeft:"auto",color:"#444"}},"Sadece sizin Drive'ınızda")
+    ),
+    // Nav
+    e("nav",{style:{display:"flex",overflowX:"auto",gap:2,padding:"5px 11px",background:"rgba(255,255,255,.02)",borderBottom:"1px solid rgba(255,255,255,.06)"}},
+      TABS.map(t=>e("button",{key:t.id,style:{display:"flex",alignItems:"center",gap:4,padding:"6px 10px",borderRadius:7,border:"none",background:tab===t.id?"rgba(233,196,106,.15)":"transparent",color:tab===t.id?"#e9c46a":"#888",cursor:"pointer",fontSize:11,fontWeight:tab===t.id?700:500,whiteSpace:"nowrap"},onClick:()=>setTab(t.id)},t.icon," ",t.label))
+    ),
+    // Main
+    e("main",{style:{padding:"16px 14px",maxWidth:960,margin:"0 auto"}},
+      tab==="dashboard"&&e(Dashboard,{state,forecast,due,todayInc:tInc,togglePay,toggleInc}),
+      tab==="income"   &&e(IncomeTab,{state,upd,toast}),
+      tab==="expenses" &&e(ExpensesTab,{state,upd,toast}),
+      tab==="payments" &&e(PaymentsTab,{state,togglePay,toggleInc}),
+      tab==="cards"    &&e(CardsTab,{state,upd,toast}),
+      tab==="portfolio"&&e(PortfolioTab,{state,upd,toast}),
+      tab==="assets"   &&e(AssetsTab,{state,upd}),
+      tab==="forecast" &&e(ForecastTab,{forecast}),
+      tab==="budgets"  &&e(BudgetsTab,{state,upd,toast})
+    ),
+    // Toast
+    toastMsg&&e("div",{style:{position:"fixed",bottom:18,right:18,zIndex:9999,padding:"9px 15px",borderRadius:10,fontWeight:700,color:"#fff",fontSize:13,background:"#2a9d8f",boxShadow:"0 6px 24px rgba(0,0,0,.4)",animation:"fi .2s ease"}},toastMsg)
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
 </script>
 </body>
 </html>
