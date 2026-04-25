@@ -538,7 +538,7 @@ function PortfolioTab(props){
       e("div",{style:sc.frow},
         isGold&&e("input",{style:sc.inp,type:"number",placeholder:"Adet",value:form.quantity,onChange:function(ev){setForm(function(f){return Object.assign({},f,{quantity:ev.target.value})})}}),
         (isDep||isFlex)&&e("input",{style:sc.inp,type:"number",placeholder:"Anapara",value:form.principal,onChange:function(ev){setForm(function(f){return Object.assign({},f,{principal:ev.target.value})})}}),
-        isDep&&e("input",{style:sc.inp,type:"number",placeholder:"Yıllık faiz %",value:form.rate,onChange:function(ev){setForm(function(f){return Object.assign({},f,{rate:ev.target.value})}),step:"0.01"}),
+        isDep&&e("input",{style:sc.inp,type:"number",placeholder:"Yıllık faiz %",step:"0.01",value:form.rate,onChange:function(ev){setForm(function(f){return Object.assign({},f,{rate:ev.target.value})})}}),
         isDep&&e("input",{style:sc.inp,type:"number",placeholder:"Vade gün sayısı",value:form.days,onChange:function(ev){setForm(function(f){return Object.assign({},f,{days:ev.target.value})})}}),
         isFlex&&e("input",{style:sc.inp,type:"number",placeholder:"Güncel değer ₺",value:form.currentValue,onChange:function(ev){setForm(function(f){return Object.assign({},f,{currentValue:ev.target.value})})}})
       ),
