@@ -64,7 +64,7 @@ function posVal(pos,prices){
   return pos.currentValue||pos.principal||0;
 }
 function portVal(portfolio,prices){return(portfolio||[]).filter(function(p){return p.active}).reduce(function(s,p){return s+posVal(p,prices)},0)}
-function nWorth(state){var a=state.assets,p=state.prices;return a.cash_try+a.cash_usd*p.usd+a.cash_eur*p.eur+a.other+portVal(state.portfolio,p)}
+function nWorth(state){var a=state.assets,p=state.prices;return a.cash_try+a.cash_usd*p.usd+a.cash_eur*p.eur+(a.gold_gram||0)*p.gold_gram+a.other+portVal(state.portfolio,p)}
 function mIncome(state,y,m){var ov=((state.monthlyData[mkey(y,m)]||{}).incomeOverrides)||{};return state.incomeItems.filter(function(i){return i.active}).reduce(function(s,i){return s+(ov[i.id]!=null?ov[i.id]:i.amount)},0)}
 function mExpense(state,y,m){var ov=((state.monthlyData[mkey(y,m)]||{}).expenseOverrides)||{};var bt=(state.budgets||[]).filter(function(b){return b.year===y&&b.month===m}).reduce(function(s,b){return s+b.amount},0);return state.expenseItems.filter(function(i){return i.active}).reduce(function(s,i){return s+(ov[i.id]!=null?ov[i.id]:i.amount)},0)+bt}
 
@@ -81,7 +81,7 @@ function mkDefault(){
       {id:uid(),label:"Kredi Kartı",type:"credit_card",amount:0,active:true,dueDay:10,remaining:0}
     ],
     creditCards:[{id:uid(),label:"Kart 1",limit:0,cutDay:25,dueDay:10,color:"#e63946"}],
-    assets:{cash_try:0,cash_usd:0,cash_eur:0,other:0},
+    assets:{cash_try:0,cash_usd:0,cash_eur:0,gold_gram:0,other:0},
     portfolio:[],
     budgets:[],
     monthlyData:{},
@@ -96,18 +96,28 @@ function dSave(t,data){var body=JSON.stringify(data);return dFind(t).then(functi
 function dLoad(t){return dFind(t).then(function(f){if(!f)return null;return fetch("https://www.googleapis.com/drive/v3/files/"+f.id+"?alt=media",{headers:{Authorization:"Bearer "+t}}).then(function(r){return r.json()})})}
 
 function fetchPrices(){
-  // Önce open.er-api (daha güncel TRY kuru)
+  // open.er-api hem döviz hem XAU destekliyor
   return fetch("https://open.er-api.com/v6/latest/USD")
     .then(function(r){return r.json()})
     .then(function(d){
-      var usd=d.rates.TRY;
-      var eur=d.rates.TRY/d.rates.EUR; // EUR/TRY
-      return fetch("https://gold-api.com/price/XAU").then(function(r){return r.json()}).then(function(g){
-        return {usd:Math.round(usd*100)/100, eur:Math.round(eur*100)/100, gold_gram:Math.round(g.price*usd/31.1035)};
-      }).catch(function(){
-        var c=LS.get("cached_prices",null);
-        return {usd:Math.round(usd*100)/100, eur:Math.round(eur*100)/100, gold_gram:c?c.gold_gram:null};
-      });
+      var usdTry=d.rates.TRY;
+      var eurTry=d.rates.TRY/d.rates.EUR;
+      // XAU varsa direkt al, yoksa gold-api'yi dene
+      if(d.rates.XAU){
+        var gramTry=Math.round((1/d.rates.XAU)*usdTry/31.1035);
+        return {usd:Math.round(usdTry*100)/100, eur:Math.round(eurTry*100)/100, gold_gram:gramTry};
+      }
+      // XAU yoksa gold-api.com'u dene
+      return fetch("https://gold-api.com/price/XAU")
+        .then(function(r){return r.json()})
+        .then(function(g){
+          var gramTry=Math.round(g.price*usdTry/31.1035);
+          return {usd:Math.round(usdTry*100)/100, eur:Math.round(eurTry*100)/100, gold_gram:gramTry};
+        })
+        .catch(function(){
+          var c=LS.get("cached_prices",null);
+          return {usd:Math.round(usdTry*100)/100, eur:Math.round(eurTry*100)/100, gold_gram:c?c.gold_gram:null};
+        });
     })
     .catch(function(){
       // Fallback: frankfurter
@@ -471,10 +481,10 @@ function AssetsTab(props){
     ),
     e("div",{style:sc.card},
       e("div",{style:sc.ct},"💵 Nakit ve Banka"),
-      [["cash_try","Nakit TL","₺",1],["cash_usd","Dolar","$",p.usd],["cash_eur","Euro","€",p.eur],["other","Diğer","₺",1]].map(function(arr){
+      [["cash_try","Nakit TL","₺",1],["cash_usd","Dolar","$",p.usd],["cash_eur","Euro","€",p.eur],["gold_gram","Gram Altın","gr",p.gold_gram],["other","Diğer","₺",1]].map(function(arr){
         var k=arr[0],l=arr[1],u=arr[2],rate=arr[3];
         return e("div",{key:k,style:sc.lrow},
-          e("div",null,e("div",{style:{color:"#ccc",fontSize:12}},l),a[k]>0&&u!=="₺"&&e("div",{style:{fontSize:9,color:"#2a9d8f"}},fmt(a[k]*rate))),
+          e("div",null,e("div",{style:{color:"#ccc",fontSize:12}},l),a[k]>0&&(u!=="₺"||k==="gold_gram")&&e("div",{style:{fontSize:9,color:k==="gold_gram"?"#f4a261":"#2a9d8f"}},fmt(a[k]*rate))),
           e("div",{style:{display:"flex",alignItems:"center",gap:4}},
             e("input",{style:sc.ainp,type:"number",value:a[k],onChange:function(ev){upd(function(s){var na=Object.assign({},s.assets);na[k]=+ev.target.value;s.assets=na})}}),
             e("span",{style:{fontSize:10,color:"#888"}},u)
