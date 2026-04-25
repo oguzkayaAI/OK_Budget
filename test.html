@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Test</title>
+<style>body{background:#0f0f13;color:#e8e8e8;font-family:sans-serif;padding:20px}</style>
+</head>
+<body>
+<h2>Adım 1: HTML çalışıyor ✓</h2>
+<div id="step2">React yükleniyor...</div>
+<div id="step3"></div>
+<div id="step4"></div>
+<div id="err" style="color:#e63946;margin-top:10px"></div>
+
+<script>
+window.onerror = function(msg,src,line,col,err){
+  document.getElementById('err').innerText = 'HATA: '+msg+' (satır '+line+')';
+};
+</script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" onload="document.getElementById('step2').innerText='Adım 2: React yüklendi ✓'" onerror="document.getElementById('err').innerText='React yüklenemedi!'"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" onload="document.getElementById('step3').innerText='Adım 3: ReactDOM yüklendi ✓'" onerror="document.getElementById('err').innerText='ReactDOM yüklenemedi!'"></script>
+<script>
+window.addEventListener('load', function(){
+  try {
+    var root = document.getElementById('step4');
+    ReactDOM.createRoot(root).render(
+      React.createElement('div', {style:{color:'#2a9d8f',fontWeight:'bold'}}, 'Adım 4: React render çalışıyor ✓')
+    );
+  } catch(ex) {
+    document.getElementById('err').innerText = 'Render hatası: ' + ex.message;
+  }
+});
+</script>
+</body>
+</html>
