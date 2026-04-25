@@ -109,7 +109,91 @@ function calcNetWorth(state,prices){
 }
 function getMonthIncome(state,y,m){const ov=state.monthlyData[getMonthKey(y,m)]?.incomeOverrides||{};return state.incomeItems.filter(i=>i.active).reduce((s,i)=>s+(ov[i.id]!==undefined?ov[i.id]:i.amount),0)}
 function getMonthExpense(state,y,m){const ov=state.monthlyData[getMonthKey(y,m)]?.expenseOverrides||{};const bt=state.budgets.filter(b=>b.year===y&&b.month===m).reduce((s,b)=>s+b.amount,0);return state.expenseItems.filter(i=>i.active).reduce((s,i)=>s+(ov[i.id]!==undefined?ov[i.id]:i.amount),0)+bt}
+// ─── MASKING & BIOMETRIC
+let _masked = true; // global mask state (default: masked)
+const maskListeners = [];
+function getMasked(){return _masked}
+function setMasked(v){_masked=v;maskListeners.forEach(fn=>fn(v))}
+function useMasked(){
+  const [masked,setM]=useState(_masked);
+  useEffect(()=>{
+    const fn=v=>setM(v);
+    maskListeners.push(fn);
+    return()=>{const i=maskListeners.indexOf(fn);if(i>-1)maskListeners.splice(i,1)};
+  },[]);
+  return masked;
+}
+
+async function authenticateAndUnmask(){
+  // WebAuthn / Face ID / Touch ID desteği varsa kullan
+  if(window.PublicKeyCredential){
+    try{
+      // Önce platform authenticator (Face ID) var mı kontrol et
+      const available=await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+      if(available){
+        // Credential kayıtlı mı kontrol et
+        const savedCred=S.get("biometric_cred_id",null);
+        if(savedCred){
+          // Authenticate
+          const challenge=new Uint8Array(32);
+          crypto.getRandomValues(challenge);
+          try{
+            await navigator.credentials.get({
+              publicKey:{
+                challenge,
+                rpId:window.location.hostname,
+                allowCredentials:[{type:"public-key",id:Uint8Array.from(atob(savedCred),c=>c.charCodeAt(0))}],
+                userVerification:"required",
+                timeout:30000,
+              }
+            });
+            setMasked(false);
+            return true;
+          }catch(e){
+            // Auth iptal edildi
+            return false;
+          }
+        } else {
+          // İlk kez — credential kaydet
+          const challenge=new Uint8Array(32);
+          crypto.getRandomValues(challenge);
+          const userId=new Uint8Array(16);
+          crypto.getRandomValues(userId);
+          try{
+            const cred=await navigator.credentials.create({
+              publicKey:{
+                challenge,
+                rp:{name:"Bütçe Defterim",id:window.location.hostname},
+                user:{id:userId,name:"kullanici",displayName:"Kullanıcı"},
+                pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
+                authenticatorSelection:{authenticatorAttachment:"platform",userVerification:"required"},
+                timeout:30000,
+              }
+            });
+            // Credential ID'yi sakla
+            const credId=btoa(String.fromCharCode(...new Uint8Array(cred.rawId)));
+            S.set("biometric_cred_id",credId);
+            setMasked(false);
+            return true;
+          }catch(e){
+            // Kayıt iptal — PIN'e düş
+          }
+        }
+      }
+    }catch(e){}
+  }
+  // Fallback: PIN
+  const pin=prompt("Rakamları görmek için PIN girin (ilk kullanımda istediğiniz PIN'i belirleyin):");
+  if(!pin)return false;
+  const savedPin=S.get("mask_pin",null);
+  if(!savedPin){S.set("mask_pin",pin);setMasked(false);return true;}
+  if(pin===savedPin){setMasked(false);return true;}
+  alert("Yanlış PIN");
+  return false;
+}
+
 function fmt(n,dec=0){if(!n&&n!==0)return"—";return new Intl.NumberFormat("tr-TR",{style:"currency",currency:"TRY",maximumFractionDigits:dec}).format(n)}
+function fmtM(n,masked,dec=0){if(masked)return"••••••";return fmt(n,dec)}
 function fmtNum(n,dec=2){if(!n&&n!==0)return"—";return n.toLocaleString("tr-TR",{maximumFractionDigits:dec})}
 function daysLeft(day){return((day-CD+31)%31)||31}
 function daysDiff(dateStr){const d=new Date(dateStr);const diff=Math.round((d-now)/(1000*60*60*24));return diff}
@@ -268,12 +352,25 @@ function togStyle(a){return{width:19,height:19,border:"none",background:"none",c
 function tbStyle(c){return{padding:"10px 15px",borderRadius:11,background:c+"22",border:`1px solid ${c}44`,color:c,fontWeight:700,fontSize:15}}
 
 // ─── SHARED COMPONENTS
-function KpiCard({label,value,color,icon}){return <div style={{...s.kcard,borderTop:`3px solid ${color}`}}><div style={{...s.kicon,color}}>{icon}</div><div style={s.kval}>{value}</div><div style={s.klbl}>{label}</div></div>}
-function MiniBar({data}){const max=Math.max(...data.map(r=>Math.max(r.income,r.expense)),1);return <div style={s.mb}>{data.map((row,i)=><div key={i} style={s.mbg}><div style={{flex:1,display:"flex",alignItems:"flex-end",gap:1}}><div style={{flex:1,height:`${(row.income/max)*50}px`,background:"#2a9d8f",borderRadius:"2px 2px 0 0",minHeight:2}}/><div style={{flex:1,height:`${(row.expense/max)*50}px`,background:"#e63946",borderRadius:"2px 2px 0 0",minHeight:2}}/></div><div style={{fontSize:8,color:"#888",marginTop:2}}>{MONTHS[i]}</div></div>)}</div>}
-function ItemRow({label,amount,color,day}){const isToday=day&&day===CD;return <div style={s.irow}><span style={{color:"#ccc"}}>{label}{isToday&&<span style={s.tag}>BUGÜN</span>}</span><span style={{fontWeight:700,color}}>{fmt(amount)}</span></div>}
+function KpiCard({label,value,color,icon}){
+  const masked=useMasked();
+  const displayVal=masked&&typeof value==="string"&&value!=="—"?"••••••":value;
+  return <div style={{...s.kcard,borderTop:`3px solid ${color}`}}><div style={{...s.kicon,color}}>{icon}</div><div style={s.kval}>{displayVal}</div><div style={s.klbl}>{label}</div></div>;
+}
+function MiniBar({data}){
+  const masked=useMasked();
+  const max=Math.max(...data.map(r=>Math.max(r.income,r.expense)),1);
+  return <div style={s.mb}>{data.map((row,i)=><div key={i} style={s.mbg}><div style={{flex:1,display:"flex",alignItems:"flex-end",gap:1}}><div style={{flex:1,height:masked?`${Math.random()*50+5}px`:`${(row.income/max)*50}px`,background:"#2a9d8f",borderRadius:"2px 2px 0 0",minHeight:2,filter:masked?"blur(3px)":"none"}}/><div style={{flex:1,height:masked?`${Math.random()*50+5}px`:`${(row.expense/max)*50}px`,background:"#e63946",borderRadius:"2px 2px 0 0",minHeight:2,filter:masked?"blur(3px)":"none"}}/></div><div style={{fontSize:8,color:"#888",marginTop:2}}>{MONTHS[i]}</div></div>)}</div>;
+}
+function ItemRow({label,amount,color,day}){
+  const masked=useMasked();
+  const isToday=day&&day===CD;
+  return <div style={s.irow}><span style={{color:"#ccc"}}>{label}{isToday&&<span style={s.tag}>BUGÜN</span>}</span><span style={{fontWeight:700,color}}>{masked?"••••":fmt(amount)}</span></div>;
+}
 
 // ─── PORTFOLIO POSITION CARD
 function PosCard({pos,prices,onDelete,onUpdate}){
+  const masked=useMasked();
   const [editing,setEditing]=useState(false);
   const [editVal,setEditVal]=useState(pos.currentValue||pos.principal||0);
 
@@ -324,9 +421,9 @@ function PosCard({pos,prices,onDelete,onUpdate}){
           <div style={s.posType}>{INV_TYPES[pos.type]||pos.type}</div>
         </div>
         <div style={s.posVal}>
-          <div style={s.posAmt}>{fmt(currentValue)}</div>
-          {label2&&<div style={s.posSub}>{label2}</div>}
-          {pnl!==null&&<div style={{fontSize:10,color:pnl>=0?"#2a9d8f":"#e63946",marginTop:2}}>{pnl>=0?"▲":"▼"} {fmt(Math.abs(pnl))}</div>}
+          <div style={s.posAmt}>{masked?"••••••":fmt(currentValue)}</div>
+          {label2&&<div style={s.posSub}>{masked?"••••":label2}</div>}
+          {pnl!==null&&<div style={{fontSize:10,color:pnl>=0?"#2a9d8f":"#e63946",marginTop:2}}>{pnl>=0?"▲":"▼"} {masked?"••••":fmt(Math.abs(pnl))}</div>}
         </div>
       </div>
 
@@ -463,6 +560,7 @@ function PortfolioTab({state,upd,showToast}){
 
 // ─── ASSETS TAB (nakit + canlı fiyat)
 function AssetsTab({state,upd}){
+  const masked=useMasked();
   const a=state.assets; const p=state.prices;
   const [loading,setLoading]=useState(false);
   const [lastFetch,setLastFetch]=useState(S.get("last_price_fetch",null));
@@ -527,7 +625,7 @@ function AssetsTab({state,upd}){
           ].map(item=>(
             <div key={item.label} style={{background:"rgba(255,255,255,.04)",borderRadius:9,padding:"9px 11px",border:`1px solid ${item.color}22`}}>
               <div style={{fontSize:9,color:"#888",marginBottom:3}}>{item.label}</div>
-              <div style={{fontSize:15,fontWeight:800,color:item.color}}>{item.value>0?item.value.toLocaleString("tr-TR"):"—"}</div>
+              <div style={{fontSize:15,fontWeight:800,color:item.color}}>{masked?"••••":item.value>0?item.value.toLocaleString("tr-TR"):"—"}</div>
               <div style={{fontSize:9,color:"#555",marginTop:2}}>{item.unit}</div>
             </div>
           ))}
@@ -549,7 +647,7 @@ function AssetsTab({state,upd}){
           ["other","Diğer","₺",1],
         ].map(([k,l,u,rate])=>(
           <div key={k} style={s.arow}>
-            <div><div style={s.albl}>{l}</div>{a[k]>0&&u!=="₺"&&<div style={{fontSize:9,color:"#2a9d8f"}}>{fmt(a[k]*rate)}</div>}</div>
+            <div><div style={s.albl}>{l}</div>{a[k]>0&&u!=="₺"&&<div style={{fontSize:9,color:"#2a9d8f"}}>{masked?"••••":fmt(a[k]*rate)}</div>}</div>
             <div style={s.ai}>
               <input style={s.ainp} type="number" value={a[k]} onChange={e=>upd(st=>{st.assets={...st.assets,[k]:+e.target.value};})}/>
               <span style={s.cur}>{u}</span>
@@ -563,6 +661,7 @@ function AssetsTab({state,upd}){
 
 // ─── DASHBOARD
 function Dashboard({state,forecastWithCumul,due,todayIncome,togglePayment,toggleIncome}){
+  const masked=useMasked();
   const prices=state.prices;
   const thisMonth=forecastWithCumul[CM]||{income:0,expense:0,net:0};
   const nw=calcNetWorth(state,prices);
@@ -591,14 +690,14 @@ function Dashboard({state,forecastWithCumul,due,todayIncome,togglePayment,toggle
       {todayIncome.length>0&&(
         <div style={s.card}>
           <div style={s.ctitle}>💰 Bugün Gelmesi Beklenen Gelirler</div>
-          {todayIncome.map(item=>{const collected=!!state.monthlyData[getMonthKey(CY,CM)]?.incomeCollected?.[item.id];return <div key={item.id} style={s.drow}><div><div style={s.dlbl}>{item.label}</div><div style={s.damt}>{fmt(item.amount)}</div></div><button style={{...s.pbtn,background:collected?"#2a9d8f":"#e9c46a",color:"#0f0f13"}} onClick={()=>toggleIncome(getMonthKey(CY,CM),item.id)}>{collected?"✓ Geldi":"Geldi mi?"}</button></div>;})}
+          {todayIncome.map(item=>{const collected=!!state.monthlyData[getMonthKey(CY,CM)]?.incomeCollected?.[item.id];return <div key={item.id} style={s.drow}><div><div style={s.dlbl}>{item.label}</div><div style={s.damt}>{masked?"••••":fmt(item.amount)}</div></div><button style={{...s.pbtn,background:collected?"#2a9d8f":"#e9c46a",color:"#0f0f13"}} onClick={()=>toggleIncome(getMonthKey(CY,CM),item.id)}>{collected?"✓ Geldi":"Geldi mi?"}</button></div>;})}
         </div>
       )}
 
       {due.length>0&&(
         <div style={s.card}>
           <div style={s.ctitle}>🔔 Bugün Yapılacak Ödemeler</div>
-          {due.map(item=><div key={item.id} style={s.drow}><div><div style={s.dlbl}>{item.label}</div>{!item.isCard&&<div style={s.damt}>{fmt(item.amount)}</div>}</div>{!item.isCut&&<button style={{...s.pbtn,background:"#e63946"}} onClick={()=>togglePayment(item.key,item.id)}>✓ Ödedim</button>}</div>)}
+          {due.map(item=><div key={item.id} style={s.drow}><div><div style={s.dlbl}>{item.label}</div>{!item.isCard&&<div style={s.damt}>{masked?"••••":fmt(item.amount)}</div>}</div>{!item.isCut&&<button style={{...s.pbtn,background:"#e63946"}} onClick={()=>togglePayment(item.key,item.id)}>✓ Ödedim</button>}</div>)}
         </div>
       )}
 
@@ -613,12 +712,13 @@ function Dashboard({state,forecastWithCumul,due,todayIncome,togglePayment,toggle
 
 // ─── INCOME TAB
 function IncomeTab({state,upd,showToast}){
+  const masked=useMasked();
   const [form,setForm]=useState({label:"",type:"salary",amount:"",incomeDay:""});
   const total=state.incomeItems.filter(i=>i.active).reduce((s,i)=>s+i.amount,0);
   return (
     <div style={s.tc}>
       <div style={s.stitle}>Gelir Kalemleri</div>
-      <div style={tbStyle("#2a9d8f")}>Toplam Aylık Gelir: {fmt(total)}</div>
+      <div style={tbStyle("#2a9d8f")}>Toplam Aylık Gelir: {masked?"••••••":fmt(total)}</div>
       <div style={s.card}>
         {state.incomeItems.map(item=>(
           <div key={item.id} style={{...s.lrow,opacity:item.active?1:0.45}}>
@@ -661,7 +761,7 @@ function IncomeTab({state,upd,showToast}){
           const isToday=item.incomeDay===CD;const isPast=item.incomeDay<CD;
           return <div key={item.id} style={{...s.prow,background:isToday?"rgba(233,196,106,.1)":isPast?"rgba(42,157,143,.05)":"rgba(255,255,255,.02)"}}>
             <div><div style={s.llbl}>{item.label}{isToday&&<span style={s.tag}>BUGÜN</span>}</div><div style={s.lsub}>Her ayın {item.incomeDay}. günü</div></div>
-            <div style={{textAlign:"right"}}><div style={{fontWeight:700,color:"#2a9d8f"}}>{fmt(item.amount)}</div><div style={{fontSize:10,color:"#888"}}>{isToday?"Bugün":isPast?`${CD-item.incomeDay}g önce`:`${item.incomeDay-CD}g sonra`}</div></div>
+            <div style={{textAlign:"right"}}><div style={{fontWeight:700,color:"#2a9d8f"}}>{masked?"••••":fmt(item.amount)}</div><div style={{fontSize:10,color:"#888"}}>{isToday?"Bugün":isPast?`${CD-item.incomeDay}g önce`:`${item.incomeDay-CD}g sonra`}</div></div>
           </div>;
         })}
       </div>
@@ -671,12 +771,13 @@ function IncomeTab({state,upd,showToast}){
 
 // ─── EXPENSES TAB
 function ExpensesTab({state,upd,showToast}){
+  const masked=useMasked();
   const [form,setForm]=useState({label:"",type:"fixed",amount:"",remaining:"",dueDay:""});
   const total=state.expenseItems.filter(i=>i.active).reduce((s,i)=>s+i.amount,0);
   return (
     <div style={s.tc}>
       <div style={s.stitle}>Gider Kalemleri</div>
-      <div style={tbStyle("#e63946")}>Toplam Aylık Gider: {fmt(total)}</div>
+      <div style={tbStyle("#e63946")}>Toplam Aylık Gider: {masked?"••••••":fmt(total)}</div>
       <div style={s.card}>
         {state.expenseItems.map(item=>(
           <div key={item.id} style={{...s.lrow,opacity:item.active?1:0.45}}>
@@ -718,7 +819,7 @@ function ExpensesTab({state,upd,showToast}){
           const isToday=item.dueDay===CD;const isPast=item.dueDay<CD;
           return <div key={item.id} style={{...s.prow,background:isToday?"rgba(230,57,70,.12)":"rgba(255,255,255,.02)"}}>
             <div><div style={s.llbl}>{item.label}{isToday&&<span style={s.tag}>BUGÜN</span>}</div><div style={s.lsub}>Her ayın {item.dueDay}. günü</div></div>
-            <div style={{textAlign:"right"}}><div style={{fontWeight:700,color:"#e63946"}}>{fmt(item.amount)}</div><div style={{fontSize:10,color:"#888"}}>{isToday?"Bugün":isPast?`${CD-item.dueDay}g önce`:`${item.dueDay-CD}g sonra`}</div></div>
+            <div style={{textAlign:"right"}}><div style={{fontWeight:700,color:"#e63946"}}>{masked?"••••":fmt(item.amount)}</div><div style={{fontSize:10,color:"#888"}}>{isToday?"Bugün":isPast?`${CD-item.dueDay}g önce`:`${item.dueDay-CD}g sonra`}</div></div>
           </div>;
         })}
       </div>
@@ -728,6 +829,7 @@ function ExpensesTab({state,upd,showToast}){
 
 // ─── PAYMENTS TAB
 function PaymentsTab({state,togglePayment,toggleIncome}){
+  const masked=useMasked();
   const [selMonth,setSelMonth]=useState(CM);
   const mkey=getMonthKey(CY,selMonth);
   const payments=state.monthlyData[mkey]?.payments||{};
@@ -756,7 +858,7 @@ function PaymentsTab({state,togglePayment,toggleIncome}){
         {incItems.sort((a,b)=>a.incomeDay-b.incomeDay).map(item=>{
           const collected=!!ic[item.id];const isToday=item.incomeDay===CD&&selMonth===CM;
           return <div key={item.id} style={{...s.prow,background:collected?"rgba(42,157,143,.12)":isToday?"rgba(233,196,106,.1)":"rgba(255,255,255,.02)"}}>
-            <div><div style={s.llbl}>{item.label}{isToday&&<span style={s.tag}>BUGÜN</span>}</div><div style={s.lsub}>Her ayın {item.incomeDay}. günü · {fmt(item.amount)}</div></div>
+            <div><div style={s.llbl}>{item.label}{isToday&&<span style={s.tag}>BUGÜN</span>}</div><div style={s.lsub}>Her ayın {item.incomeDay}. günü · {masked?"••••":fmt(item.amount)}</div></div>
             <button style={{...s.pbtn,background:collected?"#2a9d8f":"#e9c46a",color:"#0f0f13"}} onClick={()=>toggleIncome(mkey,item.id)}>{collected?"✓ Geldi":"Geldi mi?"}</button>
           </div>;
         })}
@@ -767,7 +869,7 @@ function PaymentsTab({state,togglePayment,toggleIncome}){
         {dueItems.sort((a,b)=>a.dueDay-b.dueDay).map(item=>{
           const paid=!!payments[item.id];const isToday=item.dueDay===CD&&selMonth===CM;
           return <div key={item.id} style={{...s.prow,background:paid?"rgba(42,157,143,.12)":isToday?"rgba(230,57,70,.15)":"rgba(230,57,70,.04)"}}>
-            <div><div style={s.llbl}>{item.label}{isToday&&<span style={s.tag}>BUGÜN</span>}</div><div style={s.lsub}>Her ayın {item.dueDay}'i · {fmt(item.amount)}</div></div>
+            <div><div style={s.llbl}>{item.label}{isToday&&<span style={s.tag}>BUGÜN</span>}</div><div style={s.lsub}>Her ayın {item.dueDay}'i · {masked?"••••":fmt(item.amount)}</div></div>
             <button style={{...s.pbtn,background:paid?"#2a9d8f":"#e63946"}} onClick={()=>togglePayment(mkey,item.id)}>{paid?"✓ Ödendi":"Öde"}</button>
           </div>;
         })}
@@ -823,6 +925,7 @@ function CardsTab({state,upd,showToast}){
 
 // ─── FORECAST TAB
 function ForecastTab({forecastWithCumul}){
+  const masked=useMasked();
   const maxVal=Math.max(...forecastWithCumul.map(r=>Math.max(r.income,r.expense)),1);
   return (
     <div style={s.tc}>
@@ -832,7 +935,7 @@ function ForecastTab({forecastWithCumul}){
         <div style={{overflowX:"auto"}}>
           <table style={s.tbl}>
             <thead><tr><th style={s.th}>Ay</th><th style={{...s.th,color:"#2a9d8f"}}>Gelir</th><th style={{...s.th,color:"#e63946"}}>Gider</th><th style={s.th}>Net</th><th style={s.th}>Birikimli</th></tr></thead>
-            <tbody>{forecastWithCumul.map((row,i)=><tr key={i} style={{background:i===CM?"rgba(233,196,106,.1)":"transparent"}}><td style={{...s.td,fontWeight:i===CM?700:400}}>{FULL_MONTHS[row.m]}</td><td style={{...s.td,color:"#2a9d8f"}}>{fmt(row.income)}</td><td style={{...s.td,color:"#e63946"}}>{fmt(row.expense)}</td><td style={{...s.td,color:row.net>=0?"#2a9d8f":"#e63946",fontWeight:600}}>{fmt(row.net)}</td><td style={{...s.td,color:row.cumulative>=0?"#e9c46a":"#e63946",fontWeight:700}}>{fmt(row.cumulative)}</td></tr>)}</tbody>
+            <tbody>{forecastWithCumul.map((row,i)=><tr key={i} style={{background:i===CM?"rgba(233,196,106,.1)":"transparent"}}><td style={{...s.td,fontWeight:i===CM?700:400}}>{FULL_MONTHS[row.m]}</td><td style={{...s.td,color:"#2a9d8f"}}>{masked?"••••":fmt(row.income)}</td><td style={{...s.td,color:"#e63946"}}>{masked?"••••":fmt(row.expense)}</td><td style={{...s.td,color:row.net>=0?"#2a9d8f":"#e63946",fontWeight:600}}>{masked?"••••":fmt(row.net)}</td><td style={{...s.td,color:row.cumulative>=0?"#e9c46a":"#e63946",fontWeight:700}}>{masked?"••••":fmt(row.cumulative)}</td></tr>)}</tbody>
           </table>
         </div>
       </div>
@@ -923,7 +1026,20 @@ function BudgetApp(){
     catch(e){setDriveStatus("error");showToast("Yükleme hatası: "+e.message,"error");}
   };
 
-  const togglePayment=(mkey,itemId)=>{
+  const [masked,setMaskedLocal]=useState(_masked);
+  useEffect(()=>{
+    const fn=v=>setMaskedLocal(v);
+    maskListeners.push(fn);
+    return()=>{const i=maskListeners.indexOf(fn);if(i>-1)maskListeners.splice(i,1)};
+  },[]);
+
+  const toggleMask=async()=>{
+    if(masked){
+      await authenticateAndUnmask();
+    } else {
+      setMasked(true);
+    }
+  };
     upd(st=>{
       if(!st.monthlyData[mkey])st.monthlyData={...st.monthlyData,[mkey]:{}};
       const md={...st.monthlyData[mkey]};const payments={...(md.payments||{})};
@@ -989,6 +1105,9 @@ function BudgetApp(){
         <div style={s.hRight}>
           {tIncome.length>0&&<div style={s.badge("rgba(42,157,143,.2)","rgba(42,157,143,.4)","#2a9d8f")} onClick={()=>setTab("payments")}>💰 {tIncome.length} gelir bugün</div>}
           {due.length>0&&<div style={s.badge("rgba(230,57,70,.25)","rgba(230,57,70,.5)","#ff8a80")} onClick={()=>setTab("payments")}>🔔 {due.length} ödeme bugün</div>}
+          <button style={{...s.btn(masked?"rgba(233,196,106,.2)":"rgba(255,255,255,.08)",masked?"#e9c46a":"#888",masked?"rgba(233,196,106,.3)":"rgba(255,255,255,.1)"),fontSize:16,padding:"4px 10px"}} onClick={toggleMask} title={masked?"Rakamları Göster":"Rakamları Gizle"}>
+            {masked?"🔒":"🔓"}
+          </button>
           {!state.notifGranted&&<button style={s.btn("rgba(233,196,106,.15)","#e9c46a","rgba(233,196,106,.4)")} onClick={requestNotif}>🔔 Bildirimleri Aç</button>}
           {!driveToken
             ?<button style={s.btn("rgba(66,133,244,.2)","#4285f4","rgba(66,133,244,.4)")} onClick={connectDrive}>☁ Drive</button>
