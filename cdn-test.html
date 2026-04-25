@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CDN Test</title>
+<style>body{background:#111;color:#eee;font-family:sans-serif;padding:20px;font-size:14px}div{margin:8px 0;padding:8px;border-radius:6px}.ok{background:rgba(42,157,143,.3);color:#2a9d8f}.err{background:rgba(230,57,70,.3);color:#e63946}.wait{background:rgba(255,255,255,.1);color:#888}</style>
+</head>
+<body>
+<h3 style="margin-bottom:16px">CDN Yüklenme Testi</h3>
+
+<div id="r1" class="wait">⏳ unpkg React yükleniyor...</div>
+<div id="r2" class="wait">⏳ unpkg ReactDOM yükleniyor...</div>
+<div id="r3" class="wait">⏳ jsdelivr React yükleniyor...</div>
+<div id="r4" class="wait">⏳ jsdelivr ReactDOM yükleniyor...</div>
+<div id="r5" class="wait">⏳ cdnjs React yükleniyor...</div>
+<div id="r6" class="wait">⏳ React.createElement testi...</div>
+
+<script>
+function ok(id,msg){document.getElementById(id).className='ok';document.getElementById(id).textContent='✓ '+msg}
+function err(id,msg){document.getElementById(id).className='err';document.getElementById(id).textContent='✕ '+msg}
+
+function loadScript(url,onOk,onErr){
+  var s=document.createElement('script');
+  s.src=url;
+  s.onload=onOk;
+  s.onerror=onErr;
+  document.head.appendChild(s);
+}
+
+// Test 1: unpkg React
+loadScript('https://unpkg.com/react@18.2.0/umd/react.production.min.js',
+  function(){ok('r1','unpkg React yüklendi')},
+  function(){err('r1','unpkg React BAŞARISIZ')}
+);
+
+// Test 2: unpkg ReactDOM
+loadScript('https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js',
+  function(){ok('r2','unpkg ReactDOM yüklendi')},
+  function(){err('r2','unpkg ReactDOM BAŞARISIZ')}
+);
+
+// Test 3: jsdelivr React
+loadScript('https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js',
+  function(){ok('r3','jsdelivr React yüklendi')},
+  function(){err('r3','jsdelivr React BAŞARISIZ')}
+);
+
+// Test 4: jsdelivr ReactDOM
+loadScript('https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js',
+  function(){ok('r4','jsdelivr ReactDOM yüklendi')},
+  function(){err('r4','jsdelivr ReactDOM BAŞARISIZ')}
+);
+
+// Test 5: cdnjs
+loadScript('https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
+  function(){ok('r5','cdnjs React yüklendi')},
+  function(){err('r5','cdnjs React BAŞARISIZ')}
+);
+
+// Test 6: createElement çalışıyor mu?
+setTimeout(function(){
+  try{
+    if(typeof React!=='undefined'&&React.createElement){
+      var el=React.createElement('div',null,'test');
+      ok('r6','React.createElement çalışıyor ✓');
+    } else {
+      err('r6','React tanımsız!');
+    }
+  }catch(ex){
+    err('r6','Hata: '+ex.message);
+  }
+},3000);
+</script>
+</body>
+</html>
