@@ -913,7 +913,7 @@ function PortfolioTab({state,upd,toast}){
             <div style={{marginTop:9,display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7,fontSize:11}}>
               {pos.quantity>0&&<div><span style={{color:"#666"}}>Miktar: </span><span style={{fontWeight:600}}>{pos.quantity} adet</span></div>}
               {pos.principal>0&&<div><span style={{color:"#666"}}>Anapara: </span><span style={{fontWeight:600}}>{fmt(pos.principal)}</span></div>}
-              {pos.rate>0&&<div><span style={{color:"#666"}}>Faiz: </span><span style={{fontWeight:600"}}>%{pos.rate}</span></div>}
+              {pos.rate>0&&<div><span style={{color:"#666"}}>Faiz: </span><span style={{fontWeight:600}}>%{pos.rate}</span></div>}
               {pos.days>0&&<div><span style={{color:"#666"}}>Süre: </span><span style={{fontWeight:600}}>{pos.days} gün</span></div>}
               {pos.maturityDate&&<div><span style={{color:"#666"}}>Vade: </span><span style={{fontWeight:600,color:d!==null&&d<=3?"#ff8a80":"#e8e8e8"}}>{pos.maturityDate}{d!==null&&<span style={{fontSize:9,color:"#888",marginLeft:4}}>{d===0?"bugün":d<0?Math.abs(d)+"g geçti":d+"g kaldı"}</span>}</span></div>}
               {pos.startDate&&<div><span style={{color:"#666"}}>Başlangıç: </span><span style={{fontWeight:600}}>{pos.startDate}</span></div>}
