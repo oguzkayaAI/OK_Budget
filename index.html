@@ -57,7 +57,7 @@ function dLeft(day){return((day-CD+31)%31)||31}
 function dDiff(ds){if(!ds)return null;return Math.round((new Date(ds)-NOW)/864e5)}
 
 function posVal(pos,prices){
-  if(pos.type.startsWith("gold_"))return pos.quantity*(GOLD_W[pos.type]||1)*prices.gold_gram;
+  if(pos.type.indexOf("gold_")===0)return pos.quantity*(GOLD_W[pos.type]||1)*prices.gold_gram;
   if(pos.type==="deposit_try")return pos.principal*(1+(pos.rate||0)/100*(pos.days||365)/365);
   if(pos.type==="deposit_usd")return pos.principal*(1+(pos.rate||0)/100*(pos.days||365)/365)*prices.usd;
   if(pos.type==="deposit_eur")return pos.principal*(1+(pos.rate||0)/100*(pos.days||365)/365)*prices.eur;
@@ -445,7 +445,7 @@ function AssetsTab(props){
     e("div",{style:Object.assign({},sc.card,{borderColor:"rgba(233,196,106,.2)"})},
       e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}},
         e("div",{style:sc.ct},"📡 Canlı Fiyatlar"),
-        e("button",{style:Object.assign({},sc.addbtn,{padding:"5px 10px",fontSize:11,opacity:loading?.6:1}),onClick:refresh,disabled:loading},loading?"⏳":"↻ Güncelle")
+        e("button",{style:Object.assign({},sc.addbtn,{padding:"5px 10px",fontSize:11,opacity:loading?0.6:1}),onClick:refresh,disabled:loading},loading?"⏳":"↻ Güncelle")
       ),
       offline&&e("div",{style:{color:"#e9c46a",fontSize:11,marginBottom:5}},"📴 Çevrimdışı — önbellek kullanılıyor"),
       priceInfo&&!offline&&e("div",{style:{color:"#555",fontSize:10,marginBottom:8}},"Son: "+priceInfo),
@@ -486,8 +486,8 @@ function PortfolioTab(props){
   var TODAY=new Date().toISOString().slice(0,10);
   var formS=useState({label:"",type:"deposit_try",principal:"",quantity:"",rate:"",days:"365",startDate:TODAY,maturityDate:"",currentValue:""});
   var form=formS[0],setForm=formS[1];
-  var isGold=form.type.startsWith("gold_");
-  var isDep=form.type.startsWith("deposit_");
+  var isGold=form.type.indexOf("gold_")===0;
+  var isDep=form.type.indexOf("deposit_")===0;
   var isFlex=["fund","stock","crypto","other"].indexOf(form.type)>=0;
   var totalVal=port.filter(function(p){return p.active}).reduce(function(s,p){return s+posVal(p,prices)},0);
   function calcMat(){
