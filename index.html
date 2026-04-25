@@ -109,87 +109,32 @@ function calcNetWorth(state,prices){
 }
 function getMonthIncome(state,y,m){const ov=state.monthlyData[getMonthKey(y,m)]?.incomeOverrides||{};return state.incomeItems.filter(i=>i.active).reduce((s,i)=>s+(ov[i.id]!==undefined?ov[i.id]:i.amount),0)}
 function getMonthExpense(state,y,m){const ov=state.monthlyData[getMonthKey(y,m)]?.expenseOverrides||{};const bt=state.budgets.filter(b=>b.year===y&&b.month===m).reduce((s,b)=>s+b.amount,0);return state.expenseItems.filter(i=>i.active).reduce((s,i)=>s+(ov[i.id]!==undefined?ov[i.id]:i.amount),0)+bt}
-// ─── MASKING & BIOMETRIC
-let _masked = true; // global mask state (default: masked)
+// ─── MASKING & PIN
+let _masked = true;
 const maskListeners = [];
-function getMasked(){return _masked}
-function setMasked(v){_masked=v;maskListeners.forEach(fn=>fn(v))}
+function setMasked(v){_masked=v;maskListeners.forEach(fn=>fn(v));}
 function useMasked(){
   const [masked,setM]=useState(_masked);
   useEffect(()=>{
     const fn=v=>setM(v);
     maskListeners.push(fn);
-    return()=>{const i=maskListeners.indexOf(fn);if(i>-1)maskListeners.splice(i,1)};
+    return()=>{const i=maskListeners.indexOf(fn);if(i>-1)maskListeners.splice(i,1);};
   },[]);
   return masked;
 }
-
-async function authenticateAndUnmask(){
-  // WebAuthn / Face ID / Touch ID desteği varsa kullan
-  if(window.PublicKeyCredential){
-    try{
-      // Önce platform authenticator (Face ID) var mı kontrol et
-      const available=await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-      if(available){
-        // Credential kayıtlı mı kontrol et
-        const savedCred=S.get("biometric_cred_id",null);
-        if(savedCred){
-          // Authenticate
-          const challenge=new Uint8Array(32);
-          crypto.getRandomValues(challenge);
-          try{
-            await navigator.credentials.get({
-              publicKey:{
-                challenge,
-                rpId:window.location.hostname,
-                allowCredentials:[{type:"public-key",id:Uint8Array.from(atob(savedCred),c=>c.charCodeAt(0))}],
-                userVerification:"required",
-                timeout:30000,
-              }
-            });
-            setMasked(false);
-            return true;
-          }catch(e){
-            // Auth iptal edildi
-            return false;
-          }
-        } else {
-          // İlk kez — credential kaydet
-          const challenge=new Uint8Array(32);
-          crypto.getRandomValues(challenge);
-          const userId=new Uint8Array(16);
-          crypto.getRandomValues(userId);
-          try{
-            const cred=await navigator.credentials.create({
-              publicKey:{
-                challenge,
-                rp:{name:"Bütçe Defterim",id:window.location.hostname},
-                user:{id:userId,name:"kullanici",displayName:"Kullanıcı"},
-                pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
-                authenticatorSelection:{authenticatorAttachment:"platform",userVerification:"required"},
-                timeout:30000,
-              }
-            });
-            // Credential ID'yi sakla
-            const credId=btoa(String.fromCharCode(...new Uint8Array(cred.rawId)));
-            S.set("biometric_cred_id",credId);
-            setMasked(false);
-            return true;
-          }catch(e){
-            // Kayıt iptal — PIN'e düş
-          }
-        }
-      }
-    }catch(e){}
-  }
-  // Fallback: PIN
-  const pin=prompt("Rakamları görmek için PIN girin (ilk kullanımda istediğiniz PIN'i belirleyin):");
-  if(!pin)return false;
+function tryUnmask(){
   const savedPin=S.get("mask_pin",null);
-  if(!savedPin){S.set("mask_pin",pin);setMasked(false);return true;}
-  if(pin===savedPin){setMasked(false);return true;}
-  alert("Yanlış PIN");
-  return false;
+  if(!savedPin){
+    const pin=prompt("İlk kullanım: Dilediğiniz PIN'i girin (4+ karakter):");
+    if(!pin||pin.length<4){alert("En az 4 karakter olmalı.");return;}
+    S.set("mask_pin",pin);
+    setMasked(false);
+  } else {
+    const pin=prompt("PIN girin:");
+    if(!pin)return;
+    if(pin===savedPin){setMasked(false);}
+    else{alert("Yanlış PIN");}
+  }
 }
 
 function fmt(n,dec=0){if(!n&&n!==0)return"—";return new Intl.NumberFormat("tr-TR",{style:"currency",currency:"TRY",maximumFractionDigits:dec}).format(n)}
@@ -1076,12 +1021,9 @@ function BudgetApp(){
     return()=>{const i=maskListeners.indexOf(fn);if(i>-1)maskListeners.splice(i,1)};
   },[]);
 
-  const toggleMask=async()=>{
-    if(masked){
-      await authenticateAndUnmask();
-    } else {
-      setMasked(true);
-    }
+  const toggleMask=()=>{
+    if(masked){tryUnmask();}
+    else{setMasked(true);}
   };
     upd(st=>{
       if(!st.monthlyData[mkey])st.monthlyData={...st.monthlyData,[mkey]:{}};
