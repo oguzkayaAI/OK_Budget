@@ -824,6 +824,8 @@ function App(){
     else{setMasked(true);}
   }
   function mfmt(n){if(masked)return"••••••";return fmt(n)}
+
+  function togglePay(mk,id){
     upd(function(s){var md=Object.assign({},s.monthlyData[mk]||{});var pays=Object.assign({},md.payments||{});pays[id]=!pays[id];md.payments=pays;s.monthlyData=Object.assign({},s.monthlyData);s.monthlyData[mk]=md});
     toast("Ödeme güncellendi ✓");
   }
@@ -921,10 +923,10 @@ function App(){
         )
       )
     )
+  );
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
 </script>
 </body>
 </html>
-
