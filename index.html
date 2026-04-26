@@ -65,20 +65,43 @@ function posVal(pos,prices){
 }
 function portVal(portfolio,prices){return(portfolio||[]).filter(function(p){return p.active}).reduce(function(s,p){return s+posVal(p,prices)},0)}
 function nWorth(state){var a=state.assets,p=state.prices;return a.cash_try+a.cash_usd*p.usd+a.cash_eur*p.eur+(a.gold_gram||0)*p.gold_gram+a.other+portVal(state.portfolio,p)}
-function mIncome(state,y,m){var ov=((state.monthlyData[mkey(y,m)]||{}).incomeOverrides)||{};return state.incomeItems.filter(function(i){return i.active}).reduce(function(s,i){return s+(ov[i.id]!=null?ov[i.id]:i.amount)},0)}
-function mExpense(state,y,m){var ov=((state.monthlyData[mkey(y,m)]||{}).expenseOverrides)||{};var bt=(state.budgets||[]).filter(function(b){return b.year===y&&b.month===m}).reduce(function(s,b){return s+b.amount},0);return state.expenseItems.filter(function(i){return i.active}).reduce(function(s,i){return s+(ov[i.id]!=null?ov[i.id]:i.amount)},0)+bt}
+function itemActiveInMonth(item,y,m){
+  // startYear/startMonth varsa o aydan önce sayılmasın
+  if(item.startYear!=null&&item.startMonth!=null){
+    if(y<item.startYear)return false;
+    if(y===item.startYear&&m<item.startMonth)return false;
+  }
+  return item.active;
+}
+function mIncome(state,y,m){
+  var ov=((state.monthlyData[mkey(y,m)]||{}).incomeOverrides)||{};
+  return state.incomeItems.filter(function(i){return itemActiveInMonth(i,y,m)}).reduce(function(s,i){return s+(ov[i.id]!=null?ov[i.id]:i.amount)},0);
+}
+function mExpense(state,y,m){
+  var ov=((state.monthlyData[mkey(y,m)]||{}).expenseOverrides)||{};
+  var bt=(state.budgets||[]).filter(function(b){return b.year===y&&b.month===m}).reduce(function(s,b){return s+b.amount},0);
+  // Kredi kartı aylık borçları
+  var cardDebt=0;
+  var mk2=mkey(y,m);
+  (state.creditCards||[]).forEach(function(c){
+    var debt=((state.monthlyData[mk2]||{}).cardDebts||{})[c.id]||0;
+    cardDebt+=debt;
+  });
+  var expTotal=state.expenseItems.filter(function(i){return itemActiveInMonth(i,y,m)}).reduce(function(s,i){return s+(ov[i.id]!=null?ov[i.id]:i.amount)},0);
+  return expTotal+bt+cardDebt;
+}
 
 function mkDefault(){
   return {
     incomeItems:[
-      {id:uid(),label:"Maaş",type:"salary",amount:0,active:true,incomeDay:1},
-      {id:uid(),label:"Kira Geliri",type:"rent_income",amount:0,active:true,incomeDay:5},
-      {id:uid(),label:"Faiz Geliri",type:"interest",amount:0,active:true,incomeDay:10}
+      {id:uid(),label:"Maaş",type:"salary",amount:0,active:true,incomeDay:1,startYear:CY,startMonth:CM},
+      {id:uid(),label:"Kira Geliri",type:"rent_income",amount:0,active:true,incomeDay:5,startYear:CY,startMonth:CM},
+      {id:uid(),label:"Faiz Geliri",type:"interest",amount:0,active:true,incomeDay:10,startYear:CY,startMonth:CM}
     ],
     expenseItems:[
-      {id:uid(),label:"Kira",type:"fixed",amount:0,active:true,dueDay:1,remaining:0},
-      {id:uid(),label:"Kredi",type:"installment",amount:0,active:true,dueDay:15,remaining:0},
-      {id:uid(),label:"Kredi Kartı",type:"credit_card",amount:0,active:true,dueDay:10,remaining:0}
+      {id:uid(),label:"Kira",type:"fixed",amount:0,active:true,dueDay:1,remaining:0,startYear:CY,startMonth:CM},
+      {id:uid(),label:"Kredi",type:"installment",amount:0,active:true,dueDay:15,remaining:0,startYear:CY,startMonth:CM},
+      {id:uid(),label:"Kredi Kartı",type:"credit_card",amount:0,active:true,dueDay:10,remaining:0,startYear:CY,startMonth:CM}
     ],
     creditCards:[{id:uid(),label:"Kart 1",limit:0,cutDay:25,dueDay:10,color:"#e63946"}],
     assets:{cash_try:0,cash_usd:0,cash_eur:0,gold_gram:0,other:0},
@@ -179,6 +202,7 @@ function MiniBar(props){
 
 function Dashboard(props){
   var state=props.state,forecast=props.forecast,due=props.due,todayInc=props.todayInc;
+  var mfmt=props.mfmt||fmt;
   var p=state.prices;
   var tm=forecast[CM]||{inc:0,exp:0,net:0,cum:0};
   var nw=nWorth(state);
@@ -186,11 +210,11 @@ function Dashboard(props){
   return e("div",{style:{display:"flex",flexDirection:"column",gap:13}},
     e("div",{style:{fontSize:16,fontWeight:800}},"Bu Ay · "+FULL_MONTHS[CM]+" "+CY),
     e("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:9,marginBottom:3}},
-      e(KCard,{label:"Aylık Gelir",value:fmt(tm.inc),color:"#2a9d8f",icon:"↑"}),
-      e(KCard,{label:"Aylık Gider",value:fmt(tm.exp),color:"#e63946",icon:"↓"}),
-      e(KCard,{label:"Net Tasarruf",value:fmt(tm.net),color:tm.net>=0?"#2a9d8f":"#e63946",icon:"="}),
-      e(KCard,{label:"Toplam Varlık",value:fmt(nw),color:"#e9c46a",icon:"◈"}),
-      e(KCard,{label:"Portföy",value:fmt(pv),color:"#f4a261",icon:"📊"})
+      e(KCard,{label:"Aylık Gelir",value:mfmt(tm.inc),color:"#2a9d8f",icon:"↑"}),
+      e(KCard,{label:"Aylık Gider",value:mfmt(tm.exp),color:"#e63946",icon:"↓"}),
+      e(KCard,{label:"Net Tasarruf",value:mfmt(tm.net),color:tm.net>=0?"#2a9d8f":"#e63946",icon:"="}),
+      e(KCard,{label:"Toplam Varlık",value:mfmt(nw),color:"#e9c46a",icon:"◈"}),
+      e(KCard,{label:"Portföy",value:mfmt(pv),color:"#f4a261",icon:"📊"})
     ),
     todayInc.length>0&&e("div",{style:sc.card},
       e("div",{style:sc.ct},"💰 Bugün Beklenen Gelirler"),
@@ -198,7 +222,7 @@ function Dashboard(props){
         var mk2=mkey(CY,CM);
         var col=!!(((state.monthlyData[mk2]||{}).incomeCollected)||{})[item.id];
         return e("div",{key:item.id,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid rgba(255,255,255,.06)"}},
-          e("div",null,e("div",{style:{fontWeight:600}},item.label),e("div",{style:{fontSize:11,color:"#e9c46a"}},fmt(item.amount))),
+          e("div",null,e("div",{style:{fontWeight:600}},item.label),e("div",{style:{fontSize:11,color:"#e9c46a"}},mfmt(item.amount))),
           e("button",{style:pbtn(col?"#2a9d8f":"#e9c46a",col?"#fff":"#0f0f13"),onClick:function(){props.toggleInc(mk2,item.id)}},col?"✓ Geldi":"Geldi mi?")
         );
       })
@@ -207,7 +231,7 @@ function Dashboard(props){
       e("div",{style:sc.ct},"🔔 Bugün Yapılacak Ödemeler"),
       due.map(function(item){
         return e("div",{key:item.id,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid rgba(255,255,255,.06)"}},
-          e("div",null,e("div",{style:{fontWeight:600}},item.label),!item.isCard&&e("div",{style:{fontSize:11,color:"#e9c46a"}},fmt(item.amount))),
+          e("div",null,e("div",{style:{fontWeight:600}},item.label),!item.isCard&&e("div",{style:{fontSize:11,color:"#e9c46a"}},mfmt(item.amount))),
           !item.isCut&&e("button",{style:pbtn("#e63946"),onClick:function(){props.togglePay(item.mk,item.id)}},"✓ Ödedim")
         );
       })
@@ -216,12 +240,12 @@ function Dashboard(props){
     e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:11}},
       e("div",{style:sc.card},e("div",{style:sc.ct},"Gelir Kalemleri"),
         state.incomeItems.filter(function(i){return i.active}).map(function(i){
-          return e("div",{key:i.id,style:sc.irow},e("span",{style:{color:"#ccc",fontSize:12}},i.label,i.incomeDay===CD&&e("span",{style:sc.tag},"BUGÜN")),e("span",{style:{fontWeight:700,color:"#2a9d8f",fontSize:12}},fmt(i.amount)));
+          return e("div",{key:i.id,style:sc.irow},e("span",{style:{color:"#ccc",fontSize:12}},i.label,i.incomeDay===CD&&e("span",{style:sc.tag},"BUGÜN")),e("span",{style:{fontWeight:700,color:"#2a9d8f",fontSize:12}},mfmt(i.amount)));
         })
       ),
       e("div",{style:sc.card},e("div",{style:sc.ct},"Gider Kalemleri"),
         state.expenseItems.filter(function(i){return i.active}).map(function(i){
-          return e("div",{key:i.id,style:sc.irow},e("span",{style:{color:"#ccc",fontSize:12}},i.label,i.dueDay===CD&&e("span",{style:sc.tag},"BUGÜN")),e("span",{style:{fontWeight:700,color:"#e63946",fontSize:12}},fmt(i.amount)));
+          return e("div",{key:i.id,style:sc.irow},e("span",{style:{color:"#ccc",fontSize:12}},i.label,i.dueDay===CD&&e("span",{style:sc.tag},"BUGÜN")),e("span",{style:{fontWeight:700,color:"#e63946",fontSize:12}},mfmt(i.amount)));
         })
       )
     )
@@ -230,12 +254,13 @@ function Dashboard(props){
 
 function IncomeTab(props){
   var state=props.state,upd=props.upd,toast=props.toast;
+  var mfmt=props.mfmt||fmt;
   var formS=useState({label:"",type:"salary",amount:"",incomeDay:""});
   var form=formS[0],setForm=formS[1];
   var total=state.incomeItems.filter(function(i){return i.active}).reduce(function(s,i){return s+i.amount},0);
   return e("div",{style:{display:"flex",flexDirection:"column",gap:13}},
     e("div",{style:{fontSize:16,fontWeight:800}},"Gelir Kalemleri"),
-    e("div",{style:{padding:"9px 13px",borderRadius:10,background:"rgba(42,157,143,.12)",border:"1px solid rgba(42,157,143,.25)",color:"#2a9d8f",fontWeight:700}},"Toplam: "+fmt(total)),
+    e("div",{style:{padding:"9px 13px",borderRadius:10,background:"rgba(42,157,143,.12)",border:"1px solid rgba(42,157,143,.25)",color:"#2a9d8f",fontWeight:700}},"Toplam: "+mfmt(total)),
     e("div",{style:sc.card},
       state.incomeItems.map(function(it){
         return e("div",{key:it.id,style:Object.assign({},sc.lrow,{opacity:it.active?1:0.45})},
@@ -243,7 +268,7 @@ function IncomeTab(props){
             e("button",{style:{width:17,height:17,border:"none",background:"none",color:it.active?"#2a9d8f":"#555",cursor:"pointer",fontSize:13,padding:0},onClick:function(){upd(function(s){s.incomeItems=s.incomeItems.map(function(i){return i.id===it.id?Object.assign({},i,{active:!i.active}):i})})}},it.active?"●":"○"),
             e("div",null,
               e("div",{style:{fontWeight:600,fontSize:12}},it.label,it.incomeDay===CD&&e("span",{style:sc.tag},"BUGÜN")),
-              e("div",{style:{fontSize:10,color:"#888"}},(INC_TYPES[it.type]||"")+(it.incomeDay?" · "+it.incomeDay+". gün":""))
+              e("div",{style:{fontSize:10,color:"#888"}},(INC_TYPES[it.type]||"")+(it.incomeDay?" · "+it.incomeDay+". gün":"")+(it.startMonth!=null?" · "+FULL_MONTHS[it.startMonth]+"'den itibaren":""))
             )
           ),
           e("div",{style:{display:"flex",alignItems:"center",gap:4}},
@@ -266,10 +291,13 @@ function IncomeTab(props){
       e("div",{style:sc.frow},
         e("input",{style:sc.inp,type:"number",placeholder:"Tutar ₺",value:form.amount,onChange:function(ev){setForm(function(f){return Object.assign({},f,{amount:ev.target.value})})}}),
         e("input",{style:sc.inp,type:"number",placeholder:"Ayın kaçında?",min:1,max:31,value:form.incomeDay,onChange:function(ev){setForm(function(f){return Object.assign({},f,{incomeDay:ev.target.value})})}}),
+        e("select",{style:Object.assign({},sc.sel,{minWidth:90}),value:form.startMonth!=null?form.startMonth:CM,onChange:function(ev){setForm(function(f){return Object.assign({},f,{startMonth:+ev.target.value})})}},
+          FULL_MONTHS.map(function(m,i){return e("option",{key:i,value:i},m+" '"+String(CY).slice(2))})
+        ),
         e("button",{style:sc.addbtn,onClick:function(){
           if(!form.label||!form.amount)return;
-          upd(function(s){s.incomeItems=s.incomeItems.concat([{id:uid(),label:form.label,type:form.type,amount:+form.amount,incomeDay:+form.incomeDay||0,active:true}])});
-          setForm({label:"",type:"salary",amount:"",incomeDay:""});
+          upd(function(s){s.incomeItems=s.incomeItems.concat([{id:uid(),label:form.label,type:form.type,amount:+form.amount,incomeDay:+form.incomeDay||0,active:true,startYear:CY,startMonth:form.startMonth!=null?form.startMonth:CM}])});
+          setForm({label:"",type:"salary",amount:"",incomeDay:"",startMonth:CM});
           toast("Gelir kalemi eklendi");
         }},"+ Ekle")
       )
@@ -279,12 +307,13 @@ function IncomeTab(props){
 
 function ExpensesTab(props){
   var state=props.state,upd=props.upd,toast=props.toast;
+  var mfmt=props.mfmt||fmt;
   var formS=useState({label:"",type:"fixed",amount:"",dueDay:"",remaining:""});
   var form=formS[0],setForm=formS[1];
   var total=state.expenseItems.filter(function(i){return i.active}).reduce(function(s,i){return s+i.amount},0);
   return e("div",{style:{display:"flex",flexDirection:"column",gap:13}},
     e("div",{style:{fontSize:16,fontWeight:800}},"Gider Kalemleri"),
-    e("div",{style:{padding:"9px 13px",borderRadius:10,background:"rgba(230,57,70,.12)",border:"1px solid rgba(230,57,70,.25)",color:"#e63946",fontWeight:700}},"Toplam: "+fmt(total)),
+    e("div",{style:{padding:"9px 13px",borderRadius:10,background:"rgba(230,57,70,.12)",border:"1px solid rgba(230,57,70,.25)",color:"#e63946",fontWeight:700}},"Toplam: "+mfmt(total)),
     e("div",{style:sc.card},
       state.expenseItems.map(function(it){
         return e("div",{key:it.id,style:Object.assign({},sc.lrow,{opacity:it.active?1:0.45})},
@@ -292,7 +321,7 @@ function ExpensesTab(props){
             e("button",{style:{width:17,height:17,border:"none",background:"none",color:it.active?"#2a9d8f":"#555",cursor:"pointer",fontSize:13,padding:0},onClick:function(){upd(function(s){s.expenseItems=s.expenseItems.map(function(i){return i.id===it.id?Object.assign({},i,{active:!i.active}):i})})}},it.active?"●":"○"),
             e("div",null,
               e("div",{style:{fontWeight:600,fontSize:12}},it.label,it.dueDay===CD&&e("span",{style:sc.tag},"BUGÜN")),
-              e("div",{style:{fontSize:10,color:"#888"}},(EXP_TYPES[it.type]||"")+(it.dueDay?" · "+it.dueDay+". gün":"")+(it.remaining?" · "+it.remaining+" taksit":""))
+              e("div",{style:{fontSize:10,color:"#888"}},(EXP_TYPES[it.type]||"")+(it.dueDay?" · "+it.dueDay+". gün":"")+(it.remaining?" · "+it.remaining+" taksit":"")+(it.startMonth!=null?" · "+FULL_MONTHS[it.startMonth]+"'den":""))
             )
           ),
           e("div",{style:{display:"flex",alignItems:"center",gap:4}},
@@ -316,10 +345,13 @@ function ExpensesTab(props){
         e("input",{style:sc.inp,type:"number",placeholder:"Aylık tutar ₺",value:form.amount,onChange:function(ev){setForm(function(f){return Object.assign({},f,{amount:ev.target.value})})}}),
         e("input",{style:sc.inp,type:"number",placeholder:"Vade günü",value:form.dueDay,onChange:function(ev){setForm(function(f){return Object.assign({},f,{dueDay:ev.target.value})})}}),
         e("input",{style:sc.inp,type:"number",placeholder:"Kalan taksit",value:form.remaining,onChange:function(ev){setForm(function(f){return Object.assign({},f,{remaining:ev.target.value})})}}),
+        e("select",{style:Object.assign({},sc.sel,{minWidth:90}),value:form.startMonth!=null?form.startMonth:CM,onChange:function(ev){setForm(function(f){return Object.assign({},f,{startMonth:+ev.target.value})})}},
+          FULL_MONTHS.map(function(m,i){return e("option",{key:i,value:i},m+" '"+String(CY).slice(2))})
+        ),
         e("button",{style:sc.addbtn,onClick:function(){
           if(!form.label||!form.amount)return;
-          upd(function(s){s.expenseItems=s.expenseItems.concat([{id:uid(),label:form.label,type:form.type,amount:+form.amount,dueDay:+form.dueDay||0,remaining:+form.remaining||0,active:true}])});
-          setForm({label:"",type:"fixed",amount:"",dueDay:"",remaining:""});
+          upd(function(s){s.expenseItems=s.expenseItems.concat([{id:uid(),label:form.label,type:form.type,amount:+form.amount,dueDay:+form.dueDay||0,remaining:+form.remaining||0,active:true,startYear:CY,startMonth:form.startMonth!=null?form.startMonth:CM}])});
+          setForm({label:"",type:"fixed",amount:"",dueDay:"",remaining:"",startMonth:CM});
           toast("Gider kalemi eklendi");
         }},"+ Ekle")
       )
@@ -329,6 +361,7 @@ function ExpensesTab(props){
 
 function PaymentsTab(props){
   var state=props.state;
+  var mfmt=props.mfmt||fmt;
   var selMS=useState(CM);var selM=selMS[0],setSelM=selMS[1];
   var mk=mkey(CY,selM);
   var pays=((state.monthlyData[mk]||{}).payments)||{};
@@ -345,12 +378,12 @@ function PaymentsTab(props){
       MONTHS.map(function(m,i){return e("button",{key:i,style:{padding:"4px 8px",borderRadius:6,border:"1px solid "+(selM===i?"rgba(233,196,106,.4)":"rgba(255,255,255,.1)"),background:selM===i?"rgba(233,196,106,.2)":"transparent",color:selM===i?"#e9c46a":"#888",cursor:"pointer",fontSize:11,fontWeight:selM===i?700:400},onClick:function(){setSelM(i)}},m)})
     ),
     e("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(135px,1fr))",gap:8,marginBottom:3}},
-      e(KCard,{label:"Toplam Gider",value:fmt(totalDue),color:"#e63946",icon:"↓"}),
-      e(KCard,{label:"Ödenen",value:fmt(paid),color:"#2a9d8f",icon:"✓"}),
-      e(KCard,{label:"Bekleyen",value:fmt(totalDue-paid),color:"#e9c46a",icon:"!"}),
-      e(KCard,{label:"Beklenen Gelir",value:fmt(totalInc),color:"#2a9d8f",icon:"↑"}),
-      e(KCard,{label:"Gelen",value:fmt(coll),color:"#2a9d8f",icon:"✓"}),
-      e(KCard,{label:"Bekleniyor",value:fmt(totalInc-coll),color:"#888",icon:"…"})
+      e(KCard,{label:"Toplam Gider",value:mfmt(totalDue),color:"#e63946",icon:"↓"}),
+      e(KCard,{label:"Ödenen",value:mfmt(paid),color:"#2a9d8f",icon:"✓"}),
+      e(KCard,{label:"Bekleyen",value:mfmt(totalDue-paid),color:"#e9c46a",icon:"!"}),
+      e(KCard,{label:"Beklenen Gelir",value:mfmt(totalInc),color:"#2a9d8f",icon:"↑"}),
+      e(KCard,{label:"Gelen",value:mfmt(coll),color:"#2a9d8f",icon:"✓"}),
+      e(KCard,{label:"Bekleniyor",value:mfmt(totalInc-coll),color:"#888",icon:"…"})
     ),
     e("div",{style:sc.card},
       e("div",{style:sc.ct},"💰 Gelirler · "+FULL_MONTHS[selM]),
@@ -388,19 +421,69 @@ function PaymentsTab(props){
 
 function CardsTab(props){
   var state=props.state,upd=props.upd,toast=props.toast;
+  var mfmt=props.mfmt||fmt;
   var formS=useState({label:"",limit:"",cutDay:"",dueDay:"",color:"#e63946"});
   var form=formS[0],setForm=formS[1];
+  var selMS=useState(CM);var selM=selMS[0],setSelM=selMS[1];
+  var mk=mkey(CY,selM);
+  var cardDebts=((state.monthlyData[mk]||{}).cardDebts)||{};
+  var totalDebt=state.creditCards.reduce(function(s,c){return s+(cardDebts[c.id]||0)},0);
+
+  function setCardDebt(cardId,val){
+    upd(function(s){
+      var md=Object.assign({},s.monthlyData[mk]||{});
+      var debts=Object.assign({},md.cardDebts||{});
+      debts[cardId]=+val||0;
+      md.cardDebts=debts;
+      s.monthlyData=Object.assign({},s.monthlyData);
+      s.monthlyData[mk]=md;
+    });
+  }
+
   return e("div",{style:{display:"flex",flexDirection:"column",gap:13}},
     e("div",{style:{fontSize:16,fontWeight:800}},"Kredi Kartları"),
+
+    e("div",{style:Object.assign({},sc.card,{borderColor:"rgba(230,57,70,.25)"})},
+      e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:11}},
+        e("div",{style:sc.ct},"💳 Aylık Kart Borçları · "+FULL_MONTHS[selM]),
+        e("div",{style:{display:"flex",gap:4,flexWrap:"wrap"}},
+          MONTHS.map(function(m,i){return e("button",{key:i,style:{padding:"3px 7px",borderRadius:5,border:"1px solid "+(selM===i?"rgba(233,196,106,.4)":"rgba(255,255,255,.1)"),background:selM===i?"rgba(233,196,106,.2)":"transparent",color:selM===i?"#e9c46a":"#888",cursor:"pointer",fontSize:10,fontWeight:selM===i?700:400},onClick:function(){setSelM(i)}},m)})
+        )
+      ),
+      state.creditCards.length===0&&e("div",{style:{color:"#666",fontSize:12,padding:"8px 0"}},"Henüz kart eklenmemiş."),
+      state.creditCards.map(function(c){
+        var debt=cardDebts[c.id]||0;
+        return e("div",{key:c.id,style:{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,.06)"}},
+          e("div",{style:{width:10,height:10,borderRadius:"50%",background:c.color,flexShrink:0}}),
+          e("div",{style:{flex:1}},
+            e("div",{style:{fontWeight:600,fontSize:13}},c.label),
+            e("div",{style:{fontSize:10,color:"#888"}},"Limit: "+fmt(c.limit)+"  ·  Kesim: "+c.cutDay+". Son Ödeme: "+c.dueDay+".")
+          ),
+          e("input",{
+            style:{width:110,padding:"7px 9px",borderRadius:8,background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.12)",color:"#f0f0f0",fontSize:13,fontWeight:600,textAlign:"right"},
+            type:"number",placeholder:"Borç ₺",value:debt||"",
+            onChange:function(ev){setCardDebt(c.id,ev.target.value)}
+          }),
+          e("span",{style:{fontSize:11,color:"#888"}},"₺")
+        );
+      }),
+      totalDebt>0&&e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,paddingTop:8,borderTop:"1px solid rgba(255,255,255,.08)"}},
+        e("span",{style:{fontWeight:700,color:"#aaa"}},"Toplam Kart Borcu"),
+        e("span",{style:{fontWeight:800,fontSize:15,color:"#e63946"}},mfmt(totalDebt))
+      )
+    ),
+
     e("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(225px,1fr))",gap:10}},
       state.creditCards.map(function(c){
         var dl=dLeft(c.dueDay),cl=dLeft(c.cutDay);
+        var thisDebt=cardDebts[c.id]||0;
         return e("div",{key:c.id,style:{borderRadius:12,padding:"14px",color:"#fff",background:"linear-gradient(135deg,"+c.color+"dd,"+c.color+"88)"}},
           e("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:7}},
             e("div",{style:{fontSize:14,fontWeight:800}},c.label),
             e("button",{style:{background:"rgba(0,0,0,.3)",border:"none",color:"#fff",width:20,height:20,borderRadius:4,cursor:"pointer",fontSize:10},onClick:function(){upd(function(s){s.creditCards=s.creditCards.filter(function(x){return x.id!==c.id})})}},"✕")
           ),
-          e("div",{style:{fontSize:11,opacity:.9,marginBottom:10}},"Limit: "+fmt(c.limit)),
+          e("div",{style:{fontSize:11,opacity:.9,marginBottom:4}},"Limit: "+fmt(c.limit)),
+          thisDebt>0&&e("div",{style:{fontSize:13,fontWeight:700,marginBottom:8,background:"rgba(0,0,0,.2)",borderRadius:6,padding:"4px 8px"}},FULL_MONTHS[selM]+": "+mfmt(thisDebt)),
           e("div",{style:{display:"flex",gap:8}},
             e("div",{style:{flex:1}},e("div",{style:{fontSize:20,fontWeight:900}},c.cutDay),e("div",{style:{fontSize:9,opacity:.8}},"Kesim"),e("div",{style:{fontSize:9,color:cl<=3?"#e9c46a":"rgba(255,255,255,.7)"}},cl===31?"Bugün!":cl+"g")),
             e("div",{style:{opacity:.4}},"·"),
@@ -409,6 +492,7 @@ function CardsTab(props){
         );
       })
     ),
+
     e("div",{style:sc.card},
       e("div",{style:sc.ct},"Yeni Kart"),
       e("div",{style:sc.frow},
@@ -432,6 +516,7 @@ function CardsTab(props){
 
 function AssetsTab(props){
   var state=props.state,upd=props.upd;
+  var mfmt=props.mfmt||fmt;
   var p=state.prices,a=state.assets;
   var loadS=useState(false);var loading=loadS[0],setLoading=loadS[1];
   var piS=useState(LS.get("price_info",""));var priceInfo=piS[0],setPriceInfo=piS[1];
@@ -454,9 +539,9 @@ function AssetsTab(props){
   return e("div",{style:{display:"flex",flexDirection:"column",gap:13}},
     e("div",{style:{fontSize:16,fontWeight:800}},"Varlık Takibi"),
     e("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:9,marginBottom:3}},
-      e(KCard,{label:"Toplam Varlık",value:fmt(cashVal+pv),color:"#e9c46a",icon:"◈"}),
-      e(KCard,{label:"Nakit & Banka",value:fmt(cashVal),color:"#2a9d8f",icon:"₺"}),
-      e(KCard,{label:"Portföy",value:fmt(pv),color:"#f4a261",icon:"📊"})
+      e(KCard,{label:"Toplam Varlık",value:mfmt(cashVal+pv),color:"#e9c46a",icon:"◈"}),
+      e(KCard,{label:"Nakit & Banka",value:mfmt(cashVal),color:"#2a9d8f",icon:"₺"}),
+      e(KCard,{label:"Portföy",value:mfmt(pv),color:"#f4a261",icon:"📊"})
     ),
     e("div",{style:Object.assign({},sc.card,{borderColor:"rgba(233,196,106,.2)"})},
       e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}},
@@ -580,6 +665,7 @@ function PortfolioTab(props){
 
 function ForecastTab(props){
   var forecast=props.forecast;
+  var mfmt=props.mfmt||fmt;
   var maxVal=1;
   forecast.forEach(function(r){if(r.inc>maxVal)maxVal=r.inc;if(r.exp>maxVal)maxVal=r.exp});
   return e("div",{style:{display:"flex",flexDirection:"column",gap:13}},
@@ -594,10 +680,10 @@ function ForecastTab(props){
           e("tbody",null,forecast.map(function(row,i){
             return e("tr",{key:i,style:{background:i===CM?"rgba(233,196,106,.1)":"transparent"}},
               e("td",{style:{padding:"6px 8px",textAlign:"left",borderBottom:"1px solid rgba(255,255,255,.05)",fontWeight:i===CM?700:400}},FULL_MONTHS[row.m]),
-              e("td",{style:{padding:"6px 8px",textAlign:"right",borderBottom:"1px solid rgba(255,255,255,.05)",color:"#2a9d8f"}},fmt(row.inc)),
-              e("td",{style:{padding:"6px 8px",textAlign:"right",borderBottom:"1px solid rgba(255,255,255,.05)",color:"#e63946"}},fmt(row.exp)),
-              e("td",{style:{padding:"6px 8px",textAlign:"right",borderBottom:"1px solid rgba(255,255,255,.05)",color:row.net>=0?"#2a9d8f":"#e63946",fontWeight:600}},fmt(row.net)),
-              e("td",{style:{padding:"6px 8px",textAlign:"right",borderBottom:"1px solid rgba(255,255,255,.05)",color:row.cum>=0?"#e9c46a":"#e63946",fontWeight:700}},fmt(row.cum))
+              e("td",{style:{padding:"6px 8px",textAlign:"right",borderBottom:"1px solid rgba(255,255,255,.05)",color:"#2a9d8f"}},mfmt(row.inc)),
+              e("td",{style:{padding:"6px 8px",textAlign:"right",borderBottom:"1px solid rgba(255,255,255,.05)",color:"#e63946"}},mfmt(row.exp)),
+              e("td",{style:{padding:"6px 8px",textAlign:"right",borderBottom:"1px solid rgba(255,255,255,.05)",color:row.net>=0?"#2a9d8f":"#e63946",fontWeight:600}},mfmt(row.net)),
+              e("td",{style:{padding:"6px 8px",textAlign:"right",borderBottom:"1px solid rgba(255,255,255,.05)",color:row.cum>=0?"#e9c46a":"#e63946",fontWeight:700}},mfmt(row.cum))
             );
           }))
         )
@@ -670,6 +756,14 @@ function App(){
   var lsS=useState(LS.get("last_sync",""));var lastSync=lsS[0],setLastSync=lsS[1];
   var tokenRef=useRef(null);
 
+  // PIN & masking
+  var maskedS=useState(true);var masked=maskedS[0],setMasked=maskedS[1];
+  var pinModalS=useState(false);var pinModal=pinModalS[0],setPinModal=pinModalS[1];
+  var pinSetModalS=useState(!LS.get("app_pin",null));var pinSetModal=pinSetModalS[0],setPinSetModal=pinSetModalS[1];
+  var pinInputS=useState("");var pinInput=pinInputS[0],setPinInput=pinInputS[1];
+  var pinInput2S=useState("");var pinInput2=pinInput2S[0],setPinInput2=pinInput2S[1];
+  var pinErrS=useState("");var pinErr=pinErrS[0],setPinErr=pinErrS[1];
+
   useEffect(function(){LS.set("butce_v6",state)},[state]);
   useEffect(function(){if(toastMsg){var t=setTimeout(function(){setToastMsg(null)},2800);return function(){clearTimeout(t)}}},[toastMsg]);
 
@@ -711,7 +805,25 @@ function App(){
   }
   function reqNotif(){if("Notification" in window)Notification.requestPermission().then(function(r){if(r==="granted")toast("Bildirimler aktif 🔔")})}
 
-  function togglePay(mk,id){
+  // PIN fonksiyonları
+  function handleSetPin(){
+    if(pinInput.length!==4||isNaN(pinInput)){setPinErr("4 haneli rakam giriniz");return}
+    if(pinInput!==pinInput2){setPinErr("PIN'ler eşleşmiyor");return}
+    LS.set("app_pin",pinInput);
+    setPinSetModal(false);setPinInput("");setPinInput2("");setPinErr("");
+    setMasked(false);
+    toast("PIN belirlendi ✓");
+  }
+  function handleUnlock(){
+    var saved=LS.get("app_pin",null);
+    if(pinInput===saved){setMasked(false);setPinModal(false);setPinInput("");setPinErr("");}
+    else{setPinErr("Yanlış PIN");setPinInput("");}
+  }
+  function toggleMask(){
+    if(masked){setPinModal(true);setPinInput("");setPinErr("");}
+    else{setMasked(true);}
+  }
+  function mfmt(n){if(masked)return"••••••";return fmt(n)}
     upd(function(s){var md=Object.assign({},s.monthlyData[mk]||{});var pays=Object.assign({},md.payments||{});pays[id]=!pays[id];md.payments=pays;s.monthlyData=Object.assign({},s.monthlyData);s.monthlyData[mk]=md});
     toast("Ödeme güncellendi ✓");
   }
@@ -747,6 +859,7 @@ function App(){
       e("div",{style:{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}},
         tInc.length>0&&e("div",{style:{background:"rgba(42,157,143,.2)",border:"1px solid rgba(42,157,143,.4)",color:"#2a9d8f",padding:"3px 7px",borderRadius:16,fontSize:10,cursor:"pointer",fontWeight:600},onClick:function(){setTab("payments")}},"💰 "+tInc.length),
         due.length>0&&e("div",{style:{background:"rgba(230,57,70,.25)",border:"1px solid rgba(230,57,70,.5)",color:"#ff8a80",padding:"3px 7px",borderRadius:16,fontSize:10,cursor:"pointer",fontWeight:600},onClick:function(){setTab("payments")}},"🔔 "+due.length),
+        e("button",{style:{padding:"4px 10px",borderRadius:8,fontSize:14,cursor:"pointer",border:"1px solid "+(masked?"rgba(233,196,106,.4)":"rgba(255,255,255,.2)"),background:masked?"rgba(233,196,106,.15)":"rgba(255,255,255,.06)",color:masked?"#e9c46a":"#aaa",fontWeight:700},onClick:toggleMask},masked?"🔒":"🔓"),
         Notification.permission!=="granted"&&hbtn("rgba(233,196,106,.12)","#e9c46a","rgba(233,196,106,.35)","🔔",reqNotif),
         !driveToken
           ?hbtn("rgba(66,133,244,.2)","#4285f4","rgba(66,133,244,.4)","☁ Drive",connectDrive)
@@ -761,18 +874,53 @@ function App(){
       TABS.map(function(t){return e("button",{key:t.id,style:{display:"flex",alignItems:"center",gap:3,padding:"6px 9px",borderRadius:6,border:"none",background:tab===t.id?"rgba(233,196,106,.15)":"transparent",color:tab===t.id?"#e9c46a":"#888",cursor:"pointer",fontSize:11,fontWeight:tab===t.id?700:500,whiteSpace:"nowrap"},onClick:function(){setTab(t.id)}},t.icon," ",t.label)})
     ),
     e("main",{style:{padding:"13px 11px",maxWidth:960,margin:"0 auto"}},
-      tab==="dashboard"&&e(Dashboard,{state:state,forecast:forecast,due:due,todayInc:tInc,togglePay:togglePay,toggleInc:toggleInc}),
-      tab==="income"   &&e(IncomeTab,{state:state,upd:upd,toast:toast}),
-      tab==="expenses" &&e(ExpensesTab,{state:state,upd:upd,toast:toast}),
-      tab==="payments" &&e(PaymentsTab,{state:state,togglePay:togglePay,toggleInc:toggleInc}),
-      tab==="cards"    &&e(CardsTab,{state:state,upd:upd,toast:toast}),
-      tab==="portfolio"&&e(PortfolioTab,{state:state,upd:upd,toast:toast}),
-      tab==="assets"   &&e(AssetsTab,{state:state,upd:upd}),
-      tab==="forecast" &&e(ForecastTab,{forecast:forecast}),
-      tab==="budgets"  &&e(BudgetsTab,{state:state,upd:upd,toast:toast})
+      tab==="dashboard"&&e(Dashboard,{state:state,forecast:forecast,due:due,todayInc:tInc,togglePay:togglePay,toggleInc:toggleInc,mfmt:mfmt,masked:masked}),
+      tab==="income"   &&e(IncomeTab,{state:state,upd:upd,toast:toast,mfmt:mfmt,masked:masked}),
+      tab==="expenses" &&e(ExpensesTab,{state:state,upd:upd,toast:toast,mfmt:mfmt,masked:masked}),
+      tab==="payments" &&e(PaymentsTab,{state:state,togglePay:togglePay,toggleInc:toggleInc,mfmt:mfmt,masked:masked}),
+      tab==="cards"    &&e(CardsTab,{state:state,upd:upd,toast:toast,mfmt:mfmt,masked:masked}),
+      tab==="portfolio"&&e(PortfolioTab,{state:state,upd:upd,toast:toast,mfmt:mfmt,masked:masked}),
+      tab==="assets"   &&e(AssetsTab,{state:state,upd:upd,mfmt:mfmt,masked:masked}),
+      tab==="forecast" &&e(ForecastTab,{forecast:forecast,mfmt:mfmt,masked:masked}),
+      tab==="budgets"  &&e(BudgetsTab,{state:state,upd:upd,toast:toast,mfmt:mfmt,masked:masked})
     ),
-    toastMsg&&e("div",{style:{position:"fixed",bottom:15,right:15,zIndex:9999,padding:"8px 13px",borderRadius:9,fontWeight:700,color:"#fff",fontSize:12,background:"#2a9d8f",boxShadow:"0 5px 18px rgba(0,0,0,.4)"}},toastMsg)
-  );
+    toastMsg&&e("div",{style:{position:"fixed",bottom:15,right:15,zIndex:9999,padding:"8px 13px",borderRadius:9,fontWeight:700,color:"#fff",fontSize:12,background:"#2a9d8f",boxShadow:"0 5px 18px rgba(0,0,0,.4)"}},toastMsg),
+
+    // PIN belirleme modalı (ilk açılış)
+    pinSetModal&&e("div",{style:{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.85)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}},
+      e("div",{style:{background:"#1a1a22",borderRadius:20,padding:"32px 28px",width:300,textAlign:"center",border:"1px solid rgba(233,196,106,.3)"}},
+        e("div",{style:{fontSize:32,marginBottom:12}},"🔒"),
+        e("div",{style:{fontWeight:800,fontSize:18,marginBottom:6}},"PIN Belirle"),
+        e("div",{style:{fontSize:12,color:"#888",marginBottom:20}},"Finansal verilerini korumak için\n4 haneli PIN belirle"),
+        e("input",{style:{width:"100%",padding:"12px",borderRadius:10,background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.15)",color:"#f0f0f0",fontSize:24,textAlign:"center",letterSpacing:8,marginBottom:10},type:"password",inputMode:"numeric",maxLength:4,placeholder:"• • • •",value:pinInput,onChange:function(ev){setPinInput(ev.target.value.replace(/\D/g,"").slice(0,4));setPinErr("")}}),
+        e("input",{style:{width:"100%",padding:"12px",borderRadius:10,background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.15)",color:"#f0f0f0",fontSize:24,textAlign:"center",letterSpacing:8,marginBottom:6},type:"password",inputMode:"numeric",maxLength:4,placeholder:"Tekrar gir",value:pinInput2,onChange:function(ev){setPinInput2(ev.target.value.replace(/\D/g,"").slice(0,4));setPinErr("")}}),
+        pinErr&&e("div",{style:{color:"#e63946",fontSize:12,marginBottom:8}},pinErr),
+        e("button",{style:{width:"100%",padding:"12px",borderRadius:10,background:"linear-gradient(135deg,#e9c46a,#f4a261)",border:"none",color:"#0f0f13",fontWeight:800,fontSize:15,cursor:"pointer"},onClick:handleSetPin},"PIN Belirle")
+      )
+    ),
+
+    // PIN giriş modalı (kilidi aç)
+    pinModal&&e("div",{style:{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.85)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}},
+      e("div",{style:{background:"#1a1a22",borderRadius:20,padding:"32px 28px",width:300,textAlign:"center",border:"1px solid rgba(233,196,106,.3)"}},
+        e("div",{style:{fontSize:32,marginBottom:12}},"🔓"),
+        e("div",{style:{fontWeight:800,fontSize:18,marginBottom:6}},"PIN Gir"),
+        e("div",{style:{fontSize:12,color:"#888",marginBottom:20}},"Rakamları görmek için PIN gir"),
+        e("input",{style:{width:"100%",padding:"12px",borderRadius:10,background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.15)",color:"#f0f0f0",fontSize:24,textAlign:"center",letterSpacing:8,marginBottom:6},type:"password",inputMode:"numeric",maxLength:4,placeholder:"• • • •",autoFocus:true,value:pinInput,onChange:function(ev){
+          var v=ev.target.value.replace(/\D/g,"").slice(0,4);
+          setPinInput(v);setPinErr("");
+          if(v.length===4){
+            var saved=LS.get("app_pin",null);
+            if(v===saved){setMasked(false);setPinModal(false);setPinInput("");setPinErr("");}
+            else{setPinErr("Yanlış PIN");setTimeout(function(){setPinInput("")},500);}
+          }
+        }}),
+        pinErr&&e("div",{style:{color:"#e63946",fontSize:12,marginBottom:8}},pinErr),
+        e("div",{style:{display:"flex",gap:10}},
+          e("button",{style:{flex:1,padding:"11px",borderRadius:10,background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.12)",color:"#aaa",fontWeight:700,fontSize:14,cursor:"pointer"},onClick:function(){setPinModal(false);setPinInput("");setPinErr("")}},"İptal"),
+          e("button",{style:{flex:1,padding:"11px",borderRadius:10,background:"linear-gradient(135deg,#e9c46a,#f4a261)",border:"none",color:"#0f0f13",fontWeight:800,fontSize:14,cursor:"pointer"},onClick:handleUnlock},"Gir")
+        )
+      )
+    )
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
