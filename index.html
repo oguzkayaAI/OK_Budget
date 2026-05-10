@@ -65,8 +65,15 @@ function posVal(pos,prices){
 }
 function portVal(portfolio,prices){return(portfolio||[]).filter(function(p){return p.active}).reduce(function(s,p){return s+posVal(p,prices)},0)}
 function nWorth(state){var a=state.assets,p=state.prices;return a.cash_try+a.cash_usd*p.usd+a.cash_eur*p.eur+(a.gold_gram||0)*p.gold_gram+a.other+portVal(state.portfolio,p)}
+// Uygulama başlangıç ayı: Nisan 2025 (ay=3)
+var APP_START_YEAR = 2025;
+var APP_START_MONTH = 3; // Nisan = index 3
+
 function itemActiveInMonth(item,y,m){
-  // startYear/startMonth varsa o aydan önce sayılmasın
+  // Uygulama başlangıcından önce hiçbir şey sayılmaz
+  if(y<APP_START_YEAR)return false;
+  if(y===APP_START_YEAR&&m<APP_START_MONTH)return false;
+  // Kalemin kendi başlangıç tarihi
   if(item.startYear!=null&&item.startMonth!=null){
     if(y<item.startYear)return false;
     if(y===item.startYear&&m<item.startMonth)return false;
@@ -390,12 +397,19 @@ function PaymentsTab(props){
   var mk=mkey(CY,selM);
   var pays=((state.monthlyData[mk]||{}).payments)||{};
   var ic=((state.monthlyData[mk]||{}).incomeCollected)||{};
+  var cardPays=((state.monthlyData[mk]||{}).cardPayments)||{};
+  var cardDebts=((state.monthlyData[mk]||{}).cardDebts)||{};
   var dueItems=state.expenseItems.filter(function(i){return i.active&&i.dueDay>0});
   var incItems=state.incomeItems.filter(function(i){return i.active&&i.incomeDay>0});
-  var totalDue=dueItems.reduce(function(s,i){return s+i.amount},0);
-  var paid=dueItems.filter(function(i){return pays[i.id]}).reduce(function(s,i){return s+i.amount},0);
+  // Kart borçlarını da toplama dahil et
+  var cardDebtTotal=(state.creditCards||[]).reduce(function(s,c){return s+(cardDebts[c.id]||0)},0);
+  var totalDue=dueItems.reduce(function(s,i){return s+i.amount},0)+cardDebtTotal;
+  var paidExp=dueItems.filter(function(i){return pays[i.id]}).reduce(function(s,i){return s+i.amount},0);
+  var paidCards=(state.creditCards||[]).filter(function(c){return cardPays[c.id]}).reduce(function(s,c){return s+(cardDebts[c.id]||0)},0);
+  var paid=paidExp+paidCards;
   var totalInc=incItems.reduce(function(s,i){return s+i.amount},0);
   var coll=incItems.filter(function(i){return ic[i.id]}).reduce(function(s,i){return s+i.amount},0);
+
   return e("div",{style:{display:"flex",flexDirection:"column",gap:13}},
     e("div",{style:{fontSize:16,fontWeight:800}},"Ödeme & Gelir Takibi"),
     e("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
@@ -411,32 +425,49 @@ function PaymentsTab(props){
     ),
     e("div",{style:sc.card},
       e("div",{style:sc.ct},"💰 Gelirler · "+FULL_MONTHS[selM]),
+      incItems.length===0&&e("div",{style:{color:"#666",fontSize:12}},"Gelir günü girilmemiş."),
       incItems.slice().sort(function(a,b){return a.incomeDay-b.incomeDay}).map(function(it){
         var col=!!ic[it.id],isT=it.incomeDay===CD&&selM===CM;
         return e("div",{key:it.id,style:prow(col?"rgba(42,157,143,.12)":isT?"rgba(233,196,106,.08)":"rgba(255,255,255,.02)")},
-          e("div",null,e("div",{style:{fontWeight:600}},it.label,isT&&e("span",{style:sc.tag},"BUGÜN")),e("div",{style:{fontSize:10,color:"#888"}},"Ayın "+it.incomeDay+". · "+fmt(it.amount))),
+          e("div",null,e("div",{style:{fontWeight:600}},it.label,isT&&e("span",{style:sc.tag},"BUGÜN")),e("div",{style:{fontSize:10,color:"#888"}},"Ayın "+it.incomeDay+". · "+mfmt(it.amount))),
           e("button",{style:pbtn(col?"#2a9d8f":"#e9c46a",col?"#fff":"#0f0f13"),onClick:function(){props.toggleInc(mk,it.id)}},col?"✓ Geldi":"Geldi mi?")
         );
       })
     ),
     e("div",{style:sc.card},
       e("div",{style:sc.ct},"💸 Ödemeler · "+FULL_MONTHS[selM]),
+      dueItems.length===0&&e("div",{style:{color:"#666",fontSize:12}},"Vadeli gider yok."),
       dueItems.slice().sort(function(a,b){return a.dueDay-b.dueDay}).map(function(it){
         var p2=!!pays[it.id],isT=it.dueDay===CD&&selM===CM;
         return e("div",{key:it.id,style:prow(p2?"rgba(42,157,143,.12)":isT?"rgba(230,57,70,.14)":"rgba(230,57,70,.04)")},
-          e("div",null,e("div",{style:{fontWeight:600}},it.label,isT&&e("span",{style:sc.tag},"BUGÜN")),e("div",{style:{fontSize:10,color:"#888"}},"Ayın "+it.dueDay+"'i · "+fmt(it.amount))),
+          e("div",null,e("div",{style:{fontWeight:600}},it.label,isT&&e("span",{style:sc.tag},"BUGÜN")),e("div",{style:{fontSize:10,color:"#888"}},"Ayın "+it.dueDay+"'i · "+mfmt(it.amount))),
           e("button",{style:pbtn(p2?"#2a9d8f":"#e63946"),onClick:function(){props.togglePay(mk,it.id)}},p2?"✓ Ödendi":"Öde")
         );
       })
     ),
     e("div",{style:sc.card},
-      e("div",{style:sc.ct},"💳 Kart Tarihleri · "+FULL_MONTHS[selM]),
+      e("div",{style:sc.ct},"💳 Kart Ödemeleri · "+FULL_MONTHS[selM]),
+      state.creditCards.length===0&&e("div",{style:{color:"#666",fontSize:12}},"Kart eklenmemiş."),
       state.creditCards.map(function(c){
-        var ct=c.cutDay===CD&&selM===CM,dt=c.dueDay===CD&&selM===CM;
-        return e("div",{key:c.id,style:{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid rgba(255,255,255,.06)"}},
-          e("div",{style:{width:8,height:8,borderRadius:"50%",background:c.color,flexShrink:0}}),
-          e("div",{style:{flex:1}},e("div",{style:{fontWeight:600,fontSize:12}},c.label),e("div",{style:{fontSize:10,color:"#888"}},"✂️ "+c.cutDay+"."+(ct?" (BUGÜN) ":"  ")+"💳 "+c.dueDay+"."+(dt?" (BUGÜN)":""))),
-          e("div",{style:{textAlign:"right"}},e("div",{style:{fontSize:9,color:"#aaa"}},"Limit"),e("div",{style:{fontWeight:700,fontSize:12}},fmt(c.limit)))
+        var debt=cardDebts[c.id]||0;
+        var cardPaid=!!cardPays[c.id];
+        var ct=c.cutDay===CD&&selM===CM, dt=c.dueDay===CD&&selM===CM;
+        return e("div",{key:c.id,style:prow(cardPaid?"rgba(42,157,143,.12)":debt>0?(dt?"rgba(230,57,70,.14)":"rgba(230,57,70,.04)"):"rgba(255,255,255,.02)")},
+          e("div",{style:{flex:1}},
+            e("div",{style:{display:"flex",alignItems:"center",gap:6}},
+              e("div",{style:{width:8,height:8,borderRadius:"50%",background:c.color,flexShrink:0}}),
+              e("div",{style:{fontWeight:600,fontSize:13}},c.label,dt&&e("span",{style:sc.tag},"BUGÜN"))
+            ),
+            e("div",{style:{fontSize:10,color:"#888",marginTop:2}},
+              "✂️ Kesim: "+c.cutDay+(ct?" (bugün)":"")+"  💳 Son Ödeme: "+c.dueDay+(dt?" (bugün)":""),
+              debt>0&&e("span",{style:{marginLeft:6,color:"#e63946",fontWeight:600}},mfmt(debt))
+            )
+          ),
+          debt>0
+            ?e("button",{style:pbtn(cardPaid?"#2a9d8f":"#e63946"),onClick:function(){
+                props.toggleCardPay(mk,c.id);
+              }},cardPaid?"✓ Ödendi":"Öde")
+            :e("span",{style:{fontSize:10,color:"#555"}},"Borç girilmedi")
         );
       })
     )
@@ -857,6 +888,10 @@ function App(){
     upd(function(s){var md=Object.assign({},s.monthlyData[mk]||{});var ic=Object.assign({},md.incomeCollected||{});ic[id]=!ic[id];md.incomeCollected=ic;s.monthlyData=Object.assign({},s.monthlyData);s.monthlyData[mk]=md});
     toast("Gelir güncellendi ✓");
   }
+  function toggleCardPay(mk,cardId){
+    upd(function(s){var md=Object.assign({},s.monthlyData[mk]||{});var cp=Object.assign({},md.cardPayments||{});cp[cardId]=!cp[cardId];md.cardPayments=cp;s.monthlyData=Object.assign({},s.monthlyData);s.monthlyData[mk]=md});
+    toast("Kart ödemesi güncellendi ✓");
+  }
 
   function getTodayDue(){
     var k=mkey(CY,CM),pays=((state.monthlyData[k]||{}).payments)||{},due=[];
@@ -903,7 +938,7 @@ function App(){
       tab==="dashboard"&&e(Dashboard,{state:state,forecast:forecast,due:due,todayInc:tInc,togglePay:togglePay,toggleInc:toggleInc,mfmt:mfmt,masked:masked}),
       tab==="income"   &&e(IncomeTab,{state:state,upd:upd,toast:toast,mfmt:mfmt,masked:masked}),
       tab==="expenses" &&e(ExpensesTab,{state:state,upd:upd,toast:toast,mfmt:mfmt,masked:masked}),
-      tab==="payments" &&e(PaymentsTab,{state:state,togglePay:togglePay,toggleInc:toggleInc,mfmt:mfmt,masked:masked}),
+      tab==="payments" &&e(PaymentsTab,{state:state,togglePay:togglePay,toggleInc:toggleInc,toggleCardPay:toggleCardPay,mfmt:mfmt,masked:masked}),
       tab==="cards"    &&e(CardsTab,{state:state,upd:upd,toast:toast,mfmt:mfmt,masked:masked}),
       tab==="portfolio"&&e(PortfolioTab,{state:state,upd:upd,toast:toast,mfmt:mfmt,masked:masked}),
       tab==="assets"   &&e(AssetsTab,{state:state,upd:upd,mfmt:mfmt,masked:masked}),
