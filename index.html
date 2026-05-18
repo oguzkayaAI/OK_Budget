@@ -942,8 +942,31 @@ function App(){
         clearInterval(iv);
         tokenRef.current=window.google.accounts.oauth2.initTokenClient({
           client_id:CLIENT_ID,scope:SCOPES,
-          callback:function(resp){if(resp.error){toast("Drive hatası");return}setDriveToken(resp.access_token);toast("Drive bağlandı ✓")}
+          callback:function(resp){
+            if(resp.error){
+              // Sessiz yenileme başarısız olduysa sadece token'ı temizle
+              if(resp.error==='interaction_required'||resp.error==='login_required'){
+                setDriveToken(null);
+              }
+              return;
+            }
+            var isFirstConnect=!LS.get("drive_connected","");
+            setDriveToken(resp.access_token);
+            LS.set("drive_connected","1");
+            if(isFirstConnect) toast("Drive bağlandı ✓");
+            // 55 dakika sonra sessizce yenile (token 60dk'da sürüyor)
+            clearTimeout(window._tokenRefreshTimer);
+            window._tokenRefreshTimer=setTimeout(function(){
+              if(tokenRef.current){
+                tokenRef.current.requestAccessToken({prompt:""});
+              }
+            },55*60*1000);
+          }
         });
+        // Daha önce bağlandıysa sessizce yenile (prompt gösterme)
+        if(LS.get("drive_connected","")&&tokenRef.current){
+          tokenRef.current.requestAccessToken({prompt:""});
+        }
       }
     },300);
     return function(){clearInterval(iv)};
@@ -960,7 +983,21 @@ function App(){
     }
   },[]);
 
-  function connectDrive(){if(tokenRef.current)tokenRef.current.requestAccessToken()}
+  function connectDrive(silent){
+    if(tokenRef.current){
+      tokenRef.current.requestAccessToken(silent?{prompt:""}:{});
+      if(!silent){
+        // Callback'te toast gösterilecek, burada gösterme
+      }
+    }
+  }
+  // Logout — Drive bağlantısını kes
+  function disconnectDrive(){
+    LS.set("drive_connected","");
+    clearTimeout(window._tokenRefreshTimer);
+    setDriveToken(null);
+    toast("Drive bağlantısı kesildi");
+  }
   function saveDrive(){
     if(!driveToken){connectDrive();return}setDStatus("saving");
     dSave(driveToken,state).then(function(){var t=new Date().toLocaleTimeString("tr-TR");setLastSync(t);LS.set("last_sync",t);setDStatus("ok");toast("Drive'a kaydedildi ✓")}).catch(function(){setDStatus("err");toast("Kaydetme hatası")});
@@ -1034,10 +1071,11 @@ function App(){
         e("button",{style:{padding:"4px 10px",borderRadius:8,fontSize:14,cursor:"pointer",border:"1px solid "+(masked?"rgba(233,196,106,.4)":"rgba(255,255,255,.2)"),background:masked?"rgba(233,196,106,.15)":"rgba(255,255,255,.06)",color:masked?"#e9c46a":"#aaa",fontWeight:700},onClick:toggleMask},masked?"🔒":"🔓"),
         Notification.permission!=="granted"&&hbtn("rgba(233,196,106,.12)","#e9c46a","rgba(233,196,106,.35)","🔔",reqNotif),
         !driveToken
-          ?hbtn("rgba(66,133,244,.2)","#4285f4","rgba(66,133,244,.4)","☁ Drive",connectDrive)
+          ?hbtn("rgba(66,133,244,.2)","#4285f4","rgba(66,133,244,.4)","☁ Drive",function(){connectDrive(false)})
           :e("div",{style:{display:"flex",gap:3}},
             hbtn("rgba(42,157,143,.2)","#2a9d8f","rgba(42,157,143,.4)",dStatus==="saving"?"⏳":"↑ Kaydet",saveDrive),
-            hbtn("rgba(233,196,106,.12)","#e9c46a","rgba(233,196,106,.3)",dStatus==="loading"?"⏳":"↓ Yükle",loadDrive)
+            hbtn("rgba(233,196,106,.12)","#e9c46a","rgba(233,196,106,.3)",dStatus==="loading"?"⏳":"↓ Yükle",loadDrive),
+            hbtn("rgba(255,255,255,.05)","#666","rgba(255,255,255,.1)","✕",disconnectDrive)
           )
       )
     ),
