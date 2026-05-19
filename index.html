@@ -633,6 +633,17 @@ function CardsTab(props){
   var cardDebts=((state.monthlyData[mk]||{}).cardDebts)||{};
   var totalDebt=state.creditCards.reduce(function(s,c){return s+(cardDebts[c.id]||0)},0);
 
+  function setCardDebt(cardId,val){
+    upd(function(s){
+      var md=Object.assign({},s.monthlyData[mk]||{});
+      var debts=Object.assign({},md.cardDebts||{});
+      debts[cardId]=+val||0;
+      md.cardDebts=debts;
+      s.monthlyData=Object.assign({},s.monthlyData);
+      s.monthlyData[mk]=md;
+    });
+  }
+
   function setCardDateOverride(cardId,field,val){
     upd(function(s){
       var md=Object.assign({},s.monthlyData[mk]||{});
@@ -1126,7 +1137,7 @@ function App(){
     e("header",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px",background:"rgba(255,255,255,.04)",borderBottom:"1px solid rgba(255,255,255,.08)",position:"sticky",top:0,zIndex:100,flexWrap:"wrap",gap:5}},
       e("div",{style:{display:"flex",alignItems:"center",gap:9}},
         e("div",{style:{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#e9c46a,#f4a261)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:900,color:"#0f0f13"}},"₺"),
-        e("div",null,e("div",{style:{fontWeight:800,fontSize:13}},"Bütçe Defterim"),e("div",{style:{fontSize:9,color:"#888"}},CY+" · Kişisel Finans · V20260519_3"))
+        e("div",null,e("div",{style:{fontWeight:800,fontSize:13}},"Bütçe Defterim"),e("div",{style:{fontSize:9,color:"#888"}},CY+" · Kişisel Finans · V20260519_4"))
       ),
       e("div",{style:{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}},
         tInc.length>0&&e("div",{style:{background:"rgba(42,157,143,.2)",border:"1px solid rgba(42,157,143,.4)",color:"#2a9d8f",padding:"3px 7px",borderRadius:16,fontSize:10,cursor:"pointer",fontWeight:600},onClick:function(){setTab("payments")}},"💰 "+tInc.length),
